@@ -1,4 +1,4 @@
-# flutter_app1
+# flutterci
 
 A new Flutter project.
 
@@ -50,8 +50,7 @@ flutter build appbundle --obfuscate --split-debug-info=android/debug-info
 
 export FLUTTER_ROOT="/home/soufiane/flutter/"
 # https://console.cloud.google.com/apis/library/androidpublisher.googleapis.com?hl=en&inv=1&invt=Abrhmw&project=flutter-app1-d3af8
-# https://console.cloud.google.com/iam-admin/serviceaccounts/details/114919016482211553319?hl=en&inv=1&invt=AbrhpA&project=flutter-app1-d3af8&supportedpurview=project
-fastlane run validate_play_store_json_key json_key:/home/soufiane/dev/projects/playground/dev_ops/flutter_app1/android/flutter-ci-432e4-b2e456c83eaa.json
+fastlane run validate_play_store_json_key json_key:/home/soufiane/dev/projects/playground/dev_ops/flutter_ci/flutter-ci-432e4-b2e456c83eaa.json
 (cd android && fastlane init)
 cd android && bundle exec fastlane add_plugin firebase_app_distribution
 
@@ -78,7 +77,7 @@ cd android && fastlane production
 # cd android && bundle exec fastlane run firebase_app_distribution
 cd android && bundle exec fastlane run deploy
 
-    
+
 # cd ios && fastlane <name of the lane>
 
 

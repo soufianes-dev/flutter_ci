@@ -8,7 +8,7 @@
 
 export USERNAME="soufiane-org"
 # TODO: Create token: https://app.circleci.com/settings/user/tokens
-export REPO="flutter_app1"
+export REPO="flutterci"
 export CIRCLE_TOKEN=""
 export BRANCH="main"
 export FLUTTER_VERSION="3.47.2"
