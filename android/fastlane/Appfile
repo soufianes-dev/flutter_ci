@@ -1,0 +1,2 @@
+json_key_file("flutter-ci-432e4-b2e456c83eaa.json") # Path to the json secret file - Follow https://docs.fastlane.tools/actions/supply/#setup to get one
+package_name("dev.soufianes.flutterci")

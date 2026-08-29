@@ -1,0 +1,334 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+default_platform(:android)
+
+platform :android do
+  # Constants and configuration
+  SERVICE_ACCOUNT_PATH = "../flutter-ci-432e4-b2e456c83eaa.json"
+  ANDROID_APK_PATH = "../../build/app/outputs/flutter-apk/app-release.apk".freeze
+  ANDROID_AAB_PATH = "../../build/app/outputs/bundle/release/app-release.aab".freeze
+
+  # Build configuration
+  BUILD_NAME = ENV["BUILD_NAME"] || "0.1.0"
+  BUILD_NUMBER = ENV["BUILD_NUMBER"] || "1"
+
+  # Notification Configuration
+  # SLACK_URL = ENV['SLACK_WEBHOOK_URL']
+  # DISCORD_URL = ENV['DISCORD_WEBHOOK_URL']
+  # TEAMS_URL = ENV['TEAMS_WEBHOOK_URL']
+
+  # Git Configuration
+  # GIT_BRANCH = git_branch
+  # GIT_COMMIT = last_git_commit[:commit_hash]
+  # GIT_AUTHOR = last_git_commit[:author]
+
+  before_all do
+    # TODO: Some logic
+  end
+
+  private_lane :clean_builds do
+    UI.message("Cleaning builds...")
+    sh "flutter clean"
+    sh "flutter pub get"
+  end
+
+  private_lane :scan_for_secrets do
+    # git-secrets is used to detect secrets
+    sh "git secrets --scan"
+    UI.message("No secrets detected in code")
+  rescue => e
+    UI.user_error!("Secrets detected in code: #{e.message}")
+  end
+
+  private_lane :audit_dependencies do
+    UI.message("Auditing Flutter dependencies...")
+
+    # Check unknown vulnerabilities
+    sh "flutter pub deps --style=compact"
+  end
+
+  private_lane :check_dependencies do
+    UI.message("Checking dependencies...")
+
+    sh "flutter pub get"
+
+    # Verify dependency integrity
+    sh "dart analyze --fatal-infos ."
+
+    UI.message("Dependency status checked")
+  end
+
+  private_lane :run_code_analysis do
+    UI.message("Running code analysis...")
+
+    sh "flutter analyze"
+
+    sh "dart analyze --fatal-infos ."
+
+    UI.message("Code analysis passed")
+  end
+
+  private_lane :run_tests_with_coverage do
+    UI.message("Running tests with coverage...")
+    sh "flutter test --coverage"
+
+    UI.message("Tests passed")
+  end
+
+  private_lane :flutter_test do
+    run_tests_with_coverage
+  end
+
+  private_lane :build_apk do
+    sh "flutter build apk " \
+      "--obfuscate " \
+      "--split-debug-info=android/debug-info " \
+      "--dart-define-from-file=.env " \
+      "--build-name=#{BUILD_NAME} " \
+      "--build-number=#{BUILD_NUMBER}"
+
+    UI.success("✅ APK built successfully at #{ANDROID_APK_PATH}")
+  end
+
+  private_lane :build_aab do
+    sh "flutter build appbundle" \
+    "--obfuscate " \
+    "--split-debug-info=android/debug-info" \
+    "--dart-define-from-file=.env" \
+    "--build-name=#{BUILD_NAME}" \
+    "--build-number=#{BUILD_NUMBER}"
+
+    UI.success("✅ AAB built successfully at #{ANDROID_AAB_PATH}")
+  end
+
+  def validate_aab!
+    UI.message("Current working directory #{Dir.pwd}")
+    UI.message("Validating AAB at #{ANDROID_AAB_PATH}")
+    unless File.exist?(ANDROID_AAB_PATH)
+      UI.user_error!("AAB not found at #{ANDROID_AAB_PATH}. Did the build fail?")
+    end
+  end
+
+  private_lane :upload_play_store do |options|
+    upload_to_play_store(
+      track: options[:track],
+      aab: ANDROID_AAB_PATH,
+      release_status: "completed",
+      json_key: SERVICE_ACCOUNT_PATH,
+      skip_upload_aab: false,
+      skip_upload_apk: true,
+      skip_upload_metadata: false, # Set to false to upload metadata
+      skip_upload_images: false, # Set to false to upload images
+      skip_upload_screenshots: false, # Set to false to upload screenshots
+      timeout: 300
+    )
+  end
+
+  desc "Runs all the tests"
+  lane :test do
+    flutter_test
+  end
+
+  desc "Build Android APK and AAB"
+  lane :build_android_app do
+    clean_builds
+    # build_apk
+    build_aab
+  end
+
+  desc "Only upload Play Store metadata"
+  lane :upload_metadata do
+    upload_to_play_store(
+      json_key: SERVICE_ACCOUNT_PATH,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: false, # Set to false to upload metadata
+      skip_upload_images: false, # Set to false to upload images
+      skip_upload_screenshots: false # Set to false to upload screenshots
+    )
+  end
+
+  desc "Distribute app to Firebase App Distribution"
+  lane :distribute do
+    # https://console.firebase.google.com/u/0/project/flutter-app1-d3af8/settings/integrations/playlink
+    # https://firebase.google.com/docs/app-distribution/android/distribute-fastlane?apptype=aab#before_you_begin
+    # https://play.google.com/console/u/0/developers/8193017614701971889/app-list
+    # https://console.firebase.google.com/u/0/project/flutter-app1-d3af8/appdistribution/app/android:dev.soufianes.flutterci/releases
+    build_android_app
+    validate_aab!
+
+    # Prepare release notes
+    release_notes = begin
+      File.read("release_notes.txt")
+    rescue
+      "Bug fixes"
+    end
+
+    begin
+      firebase_app_distribution(
+        app: ENV["FIREBASE_ANDROID_APP_ID"],
+        # firebase_cli_token: ENV['FIREBASE_CLI_TOKEN'], # Empty if we already authenticated
+        service_credentials_file: SERVICE_ACCOUNT_PATH,
+        android_artifact_type: "AAB",
+        android_artifact_path: ANDROID_AAB_PATH,
+        release_notes: release_notes,
+        groups: "qa-team,trusted-testers".delete(" "),
+        testers: "soufianex98@gmail.com,soufianes.pro@gmail.com".delete(" "),
+        debug: true
+      )
+    rescue => e
+      UI.error("Failed to upload to Firebase App Distribution: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  desc "Submit to Play Store Internal Track"
+  lane :internal do
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "internal")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  # TODO: https://chat.deepseek.com/a/chat/s/a51875b4-0826-4b01-8168-7624ecc20aae
+  desc "Deploy to Play Store Alpha Track (Closed Testing)"
+  lane :alpha do
+    # sh "your_script.sh"
+    # You can also use other beta testing services here
+
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "alpha")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  desc "Submit to Play Store Beta Track (Open Testing)"
+  lane :beta do
+    # sh "your_script.sh"
+    # You can also use other beta testing services here
+
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "beta")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  desc "Promote Beta track to production"
+  lane :promote_to_production do
+    # Here we don't need to build the app
+
+    upload_to_play_store(
+      track: "beta",
+      track_promote_to: "production",
+      skip_upload_changelogs: false, # Changelogs must be included
+      json_key: SERVICE_ACCOUNT_PATH
+    )
+  rescue => e
+    UI.error("Failed to upload to Play Store: #{e.message}")
+    # Optional: Notify Slack/email on failure
+
+    # Install the plugin: fastlane add_plugin discord
+    # discord(
+    #   message: "Play Store upload failed: #{e.message}",
+    #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+    # )
+
+    # Re raise the error to fail the lane
+    raise e
+  end
+
+  desc "Deploy to production"
+  lane :production do
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "production")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  after_all do
+    # TODO: Some logic
+  end
+
+  error do |lane, exception|
+    UI.error("Error in lane: #{lane}")
+    UI.error(exception.message)
+  end
+end

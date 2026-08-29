@@ -1,0 +1,415 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_CHANNEL: "stable"
+  JAVA_VERSION: "17"
+  XCODE_VERSION: "26.4" # Stable Xcode version # TODO: Use latest version
+  JAVA_DISTRIBUTION: "temurin"
+  BUNDLE_NAME: "dev.soufianes.flutterci"
+  #TODO: add secret: APPLE_TEAM_ID: "XXXXXXXXXX"
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    env:
+      ENV_VAR1: ${{ secrets.ENV_VAR1 }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: List available simulators and runtimes
+        run: |
+          echo "Available device types:"
+          xcrun simctl list devicetypes
+          echo "Available runtimes:"
+          xcrun simctl list runtimes
+          echo "Available devices:"
+          xcrun simctl list devices available
+
+      - name: Create or select iOS simulator
+        run: |
+          # Find the latest iOS runtime
+          LATEST_IOS_RUNTIME=$(xcrun simctl list runtimes available | grep iOS | tail -1 | awk '{print $NF}' | tr -d '()')
+          echo "Selected iOS runtime: $LATEST_IOS_RUNTIME"
+
+          # Look for an existing iPhone 15 simulator with the selected runtime
+          EXISTING_DEVICE=$(xcrun simctl list devices available | grep "iPhone 15" | grep "$LATEST_IOS_RUNTIME" | awk -F '[()]' '{print $2}' | head -1)
+
+          if [ ! -z "$EXISTING_DEVICE" ]; then
+            echo "Using existing iPhone 15 simulator: $EXISTING_DEVICE"
+            echo "DEVICE_ID=$EXISTING_DEVICE" >> $GITHUB_ENV
+          else
+            echo "No existing iPhone 15 simulator found. Creating new one..."
+            DEVICE_ID=$(xcrun simctl create "GitHub-Action-iPhone" "iPhone 15" "$LATEST_IOS_RUNTIME" || { echo "Failed to create simulator"; exit 1; })
+            echo "Created simulator with ID: $DEVICE_ID"
+            echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
+          fi
+
+      - name: Boot iOS simulator
+        timeout-minutes: 3
+        run: |
+          # Force software rendering to avoid hardware acceleration issues
+          defaults write com.apple.CoreSimulator.${{ env.DEVICE_ID }} FramebufferEmulationMode -int 2 || echo "Failed to set software rendering, continuing with default"
+
+          xcrun simctl bootstatus ${{ env.DEVICE_ID }} -b
+          xcrun simctl list devices | grep Booted # Visible confirmation in the log
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          #cache: true
+          #cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
+          #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          flutter-version: ${{ env.FLUTTER_VERSION }} # TODO: Use latest version
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      # - name: Install CocoaPods dependencies
+      #   run: |
+      #     flutter pub get
+      #     (cd ios && pod install --repo-update)
+
+      - name: Create .env from GitHub secrets
+        run: |
+          cat > .env <<'EOF'
+          ENV_VAR1=${{ secrets.ENV_VAR1 }}
+          EOF
+
+      - name: Build iOS application (simulator build)
+        run: flutter build ios --simulator --no-codesign
+
+      - name: Generate export options
+        run: |
+          cat > ios/export-configs/app-store.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+              <!-- https://chatgpt.com/share/677169bb-f6e4-8002-af7c-60c44af8bf6f -->
+              <dict>
+                  <key>method</key>
+                  <string>app-store</string>
+                  <key>teamID</key>
+                  <string>${{ secrets.APPLE_TEAM_ID }}</string><!-- TODO: teamID -->
+                  <key>uploadBitcode</key>
+                  <false />
+                  <key>uploadSymbols</key>
+                  <true />
+                  <key>compileBitCode</key>
+                  <true />
+                  <key>stripSwiftSymbols</key>
+                  <true />
+                  <key>signingStyle</key>
+                  <string>manual</string>
+                  <key>provisioningProfiles</key>
+                  <dict>
+                      <key>${{ env.BUNDLE_NAME }}</key>
+                      <string>flutterapp1_appstore</string><!-- TODO: Your app-store .mobileprovision file name without the file extension-->
+                  </dict>
+              </dict>
+          </plist>
+          EOF
+
+      # - name: Build release application (.ipa)
+      #   env:
+      #     # TODO: create a base64 data using `base64 -i development.p12` and save it to github secrets
+      #     BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+      #     # TODO: KEYCHAIN_PASSWORD can be any new random password
+      #     KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      #     # TODO: create a base64 data using `base64 -i PROVISIONING_PROFILE.mobileprovision` and save it to github secrets
+      #     BUILD_PROVISIONING_PROFILE_BASE64: ${{ secrets.BUILD_PROVISIONING_PROFILE_BASE64 }}
+      #     P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      #     PP_NAME: flutterapp1_dev
+      #     EXPORT_METHOD: development # | distribution
+      #     EXPORT_IPA_PATH: "build/ios/ipa/Runner.ipa" # Final IPA artifact path
+      #     APPLE_ID_EMAIL: ${{ secrets.APPLE_ID_EMAIL }}
+      #     APPLE_ID_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_APP_SPECIFIC_PASSWORD }}
+      #   run: |
+      #     # https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications
+
+      #     # Avoid leftover credentials on the runner
+      #     trap 'security delete-keychain $KEYCHAIN_PATH' EXIT
+
+      #     # Create variables
+      #     CERTIFICATE_PATH="$RUNNER_TEMP/$EXPORT_METHOD.p12"
+      #     PP_PATH="$RUNNER_TEMP/$PP_NAME.mobileprovision"
+      #     KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+      #     # Import certificate and provisioning profile from secrets
+      #     echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+      #     echo -n "$BUILD_PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+
+      #     # Create temporary keychain
+      #     security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+      #     security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+      #     PROVISIONING_PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+      #     APP_BUILD_NAME="0.1.0"
+      #     APP_BUILD_NUMBER="1"
+
+      #     # Install certificate to keychain
+      #     security import $CERTIFICATE_PATH \
+      #       -P $P12_PASSWORD \
+      #       -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+      #     security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     security list-keychain -d user -s $KEYCHAIN_PATH
+
+      #     # Confirm that .p12 file is installed
+      #     security find-certificate -c "$EXPORT_METHOD" -a -Z || { echo "Certificate not found!"; exit 1; }
+
+      #     # For Xcode 16 and later
+      #     mkdir -p "$PROVISIONING_PROFILES_DIR" || { echo "Failed to create provisioning profiles directory!"; exit 1; }
+
+      #     # Install provisioning profile
+      #     cp $PP_PATH \
+      #       "$PROVISIONING_PROFILES_DIR" || { echo "Failed to copy provisioning profile!"; exit 1; }
+
+      #     # (Optional) Confirm it's installed (in MacOS machine) :
+      #     ls "$PROVISIONING_PROFILES_DIR"
+
+      #     flutter build ipa \
+      #       --release \
+      #       --export-options-plist=ios/export-configs/$EXPORT_METHOD.plist \
+      #       #--dart-define-from-file=.env
+      #       --obfuscate \
+      #       --split-debug-info=ios/debug-info \
+      #       --build-name=$APP_BUILD_NAME \
+      #       --build-number=$APP_BUILD_NUMBER  || { echo "Flutter build failed!"; exit 1; }
+
+      #     # Archiving debug symbols
+      #     zip -r ios/debug-info/app.dSYM.zip ios/debug-info
+
+      # - name: Archive ipa
+      #   run: |
+      #     (
+      #       cd build/ios/ipa
+      #       zip -r Runner.ipa.zip Runner.ipa
+      #     )
+
+      # - name: Upload ipa artifact
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: ios-ipa-build
+      #     path: build/ios/ipa/Runner.ipa.zip
+
+      # - name: Upload debug symbols
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: ios-debug-symbols
+      #     path: ios/debug-info/app.dSYM.zip
+      #     retention-days: 60
+
+      # - name: Validate ipa
+      #   run: |
+      #     xcrun transporter validate \
+      #     --assetFile $EXPORT_IPA_PATH \
+      #     --username $APPLE_ID_EMAIL \
+      #     --password $APPLE_ID_APP_SPECIFIC_PASSWORD
+
+      # - name: Upload ipa to app store
+      #   run: |
+      #     xcrun transporter upload \
+      #     --assetFile $EXPORT_IPA_PATH \
+      #     --username $APPLE_ID_EMAIL \
+      #     --password $APPLE_ID_APP_SPECIFIC_PASSWORD \
+      #     --verbose
+
+      - name: Upload iOS artifact (simulator build)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-build
+          path: build/ios/iphonesimulator
+          retention-days: 60
+
+      - name: Upload compressed ios directory artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: compressed-ios-dir
+          path: ios.zip
+          retention-days: 30
+
+      - name: Install iOS app on simulator
+        run: |
+          # Install onto the currently booted simulator
+          xcrun simctl install booted build/ios/iphonesimulator/Runner.app
+
+          # Install onto a specific simulator by it's UDID
+          # xcrun simctl install ${{ env.DEVICE_ID }} build/ios/iphonesimulator/Runner.app
+
+          # Launch the app using the bundle ID
+          # xcrun simctl launch booted dev.soufianes.flutterci
+
+          # Or xcrun simctl launch ${{ env.DEVICE_ID }} dev.soufianes.flutterci
+
+          # (Optional)
+          # xcrun simctl location booted set 37.7749 -122.4194
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Install Maestro CLI
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+          ~/.maestro/bin/maestro --version
+
+      - name: Test app using Maestro (e2e)
+        run: |
+          mkdir -p maestro/recordings maestro/maestro_outputs
+
+          ~/.maestro/bin/maestro record \
+            -e APP_ID=dev.soufianes.flutterci \
+            --local maestro/flows/main.yaml recordings/app_flow.mp4
+
+          #Collect screenshots wherever Maestro dropped them
+          find . -maxdepth 3 -name '*.png' -exec mv {} maestro/maestro_outputs/ \;
+          zip -r maestro/maestro_outputs.zip maestro/maestro_outputs/
+          ls -la
+
+      - name: Upload Maestro outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-maestro-outputs
+          path: maestro/maestro_outputs.zip
+
+      # - name: Capture screenshots
+      #   run: |
+      #     echo "Starting screenshot capture..."
+      #     mkdir -p recordings/screenshots
+
+      #     # Check disk space
+      #     echo "Checking disk space..."
+      #     df -h .
+
+      #     # Verify simulator is ready
+      #     echo "Checking simulator status..."
+      #     xcrun simctl list devices | grep "${{ env.DEVICE_ID }}" || { echo "Simulator not found or not ready!"; exit 1; }
+      #     xcrun simctl bootstatus ${{ env.DEVICE_ID }} || { echo "Simulator not in a valid state!"; exit 1; }
+
+      #     # Capture screenshots every 1s for 30 seconds (30 screenshots)
+      #     echo "Capture screenshots every 1s for 30 seconds..."
+      #     COUNT=1
+      #     MAX_COUNT=30
+      #     while [ $COUNT -le $MAX_COUNT ]; do
+      #       xcrun simctl io ${{ env.DEVICE_ID }} screenshot recordings/screenshots/screenshot_$COUNT.png || { echo "Failed to capture screenshot $COUNT !"; exit 1; }
+      #       echo "Captured screenshot $COUNT"
+      #       COUNT=$((COUNT + 1))
+      #       # Sleep for 1 second
+      #       sleep 1
+      #     done
+
+      #     # Verify screenshots were captured
+      #     SCREENSHOT_COUNT=$(ls -1 recordings/screenshots/ | wc -l)
+      #     if [ "$SCREENSHOT_COUNT" -gt 0 ]; then
+      #       echo "Captured $SCREENSHOT_COUNT screenshots successfully"
+      #       ls -la recordings/screenshots/
+      #       # Check if at least one screenshot is non-empty
+      #       FIRST_SCREENSHOT_SIZE=$(stat -f %z recordings/screenshots/screenshot_1.png)
+      #       if [ "$FIRST_SCREENSHOT_SIZE" -gt 0 ]; then
+      #         echo "First screenshot size: $FIRST_SCREENSHOT_SIZE bytes"
+      #       else
+      #         echo "Error: Screenshots are empty!"
+      #         xcrun simctl diagnose > simulator_diagnostic.txt
+      #         echo "Simulator diagnostic saved to simulator_diagnostic.txt"
+      #         exit 1
+      #       fi
+      #     else
+      #       echo "Error: No screenshots captured!"
+      #       xcrun simctl diagnose > simulator_diagnostic.txt
+      #       echo "Simulator diagnostic saved to simulator_diagnostic.txt"
+      #       exit 1
+      #     fi
+      #   env:
+      #     DEVICE_ID: ${{ env.DEVICE_ID }}
+
+      - name: Shutdown simulator
+        if: always() # Run even if previous steps fail
+        run: |
+          if [ ! -z "${{ env.DEVICE_ID }}" ]; then
+            echo "Shutting down simulator..."
+            xcrun simctl shutdown ${{ env.DEVICE_ID }} || echo "Simulator already shut down or shutdown failed!"
+            xcrun simctl delete ${{ env.DEVICE_ID }} || echo "Simulator deletion failed!"
+          else
+            echo "No DEVICE_ID set, skipping shutdown and delete!"
+          fi
+
+      # - name: Prepare and upload artifacts
+      #   if: always() # Run even if previous steps fail
+      #   run: |
+      #     echo "Preparing artifacts for upload..."
+      #     mkdir -p artifacts
+
+      #     # Copy screenshots if they exist
+      #     if [ -d "recordings/screenshots" ]; then
+      #       cp -r recordings/screenshots artifacts/screenshots
+      #       echo "Screenshots copied to artifacts/"
+      #     else
+      #       echo "No screenshots found to copy!"
+      #     fi
+
+      #     # Copy diagnostic file if it exists
+      #     if [ -f "simulator_diagnostic.txt" ]; then
+      #       cp -r simulator_diagnostic.txt artifacts/simulator_diagnostic.txt
+      #       echo "Diagnostic file copied to artifacts/"
+      #     else
+      #       echo "No diagnostic file found to copy!"
+      #     fi
+
+      #     # List artifacts directory contents
+      #     echo "Artifacts directory contents:"
+      #     ls -la artifacts/
+
+      #     # Compress artifacts into a zip file for faster upload
+      #     if [ -n "$(ls artifacts/)" ]; then
+      #       zip -r artifacts.zip artifacts/
+      #       echo "Artifacts compressed into artifacts.zip"
+      #     else
+      #       echo "No artifacts to compress!"
+      #     fi
+      #   continue-on-error: true # Continue even if artifact preparation fails
+
+      # - name: Upload artifacts
+      #   if: always() # Run even if previous steps fail
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: ios-simulator-artifacts
+      #     path: artifacts.zip
+      #     retention-days: 30
+      #     if-no-files-found: warn # Warn if no zip file is found
+
+      # More: https://chatgpt.com/share/67603bca-97a0-800f-bf71-14f90fd55afb
+      # - name: Run Flutter Integration Tests
+      #   run: |
+      #     # Run the integration tests
+      #     # flutter test integration_test/app_test.dart -d ${{ env.SIMULATOR_UDID }}

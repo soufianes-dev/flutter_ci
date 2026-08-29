@@ -1,0 +1,24 @@
+appId: "${APP_ID}"
+---
+- extendedWaitUntil:
+    visible: "Login"
+    optional: true 
+- takeScreenshot: "login_screen1"
+- extendedWaitUntil:
+    visible: "Login"
+    optional: true 
+- assertVisible: "email"
+- tapOn: 
+    text: "email"
+- inputText: "${EMAIL}"
+- assertVisible: "password"
+- tapOn: 
+    text: "password"
+- inputText: "${PASSWORD}"
+- assertVisible: "Login"
+- takeScreenshot: "login_screen2"
+- tapOn: 
+    text: "LOGIN"
+- runFlow: 
+    label: "Welcome Screen"
+    file: welcome.yaml

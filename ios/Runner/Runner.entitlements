@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+
+        <!-- Only security-sensitive capabilities like: -->
+        <!-- aps-environment (Push Notifications) -->
+        <!-- com.apple.security.application-groups (App Groups) -->
+        <!-- com.apple.developer.healthkit (HealthKit) -->
+        <!-- com.apple.developer.networking.vpn.api (VPN) -->
+        <!-- com.apple.developer.in-app-payments (Apple Pay) -->
+
+        <!-- Entitlements are embedded in the code signature and validated by Apple and the OS for security-->
+
+        <!-- TODO: Uncomment if using Push notifications
+        <key>aps-environment</key>
+        <string>production</string> or: development
+		<key>UIBackgroundModes</key> 
+		<array>
+			<string>fetch</string>
+			<string>remote-notification</string>
+		</array>
+		-->
+
+        <!-- Other Entitlements if applicable... -->
+    </dict>
+</plist>

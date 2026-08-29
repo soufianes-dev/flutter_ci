@@ -46,3 +46,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Service account
+flutter-ci-432e4-b2e456c83eaa.json
+
+# Environment variables
+.env

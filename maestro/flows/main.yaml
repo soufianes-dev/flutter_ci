@@ -1,0 +1,22 @@
+# https://maestro.dev/
+# https://x.com/maestro__dev
+# https://playground.maestro.dev/
+# https://github.com/bizz84/flutter_ship_app/blob/main/maestro/take_screenshots.yaml
+# maestro test maestro/flows/main.yaml
+# maestro record -e APP_ID=dev.soufianes.flutterci --local maestro/flows/main.yaml recordings/app_flow.mp4
+# /home/soufiane/.maestro/tests/2025-09-20_111233/maestro-recording.mp4
+
+appId: ${APP_ID}
+name: "Take screenshots"
+env:
+    # List your environment variables here
+    EMAIL: "example@mail.com"
+    PASSWORD: "password123"
+---
+- launchApp:
+      label: "Open App"
+      clearState: true # Clears local storage, db...
+- runFlow:
+      label: "Login Screen"
+      file: login.yaml
+- killApp

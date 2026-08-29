@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <!-- https://chatgpt.com/share/677169bb-f6e4-8002-af7c-60c44af8bf6f -->
+    <dict>
+        <key>method</key>
+        <string>ad-hoc</string>
+        <key>teamID</key>
+        <string>XXXXXXXXXX</string><!-- TODO: teamID -->
+        <key>signingStyle</key>
+        <string>manual</string>
+        <key>provisioningProfiles</key>
+        <dict>
+            <key>dev.soufianes.flutterci</key><!-- TODO: Your bundle name-->
+            <string>flutterapp1_adhoc</string><!-- TODO: Your app-store .mobileprovision file name
+            without the file extension-->
+        </dict>
+    </dict>
+</plist>

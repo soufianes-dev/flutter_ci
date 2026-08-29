@@ -1,0 +1,166 @@
+name: Android Build
+
+on:
+  # push:
+  #   branches:
+  #     - main
+  # Enable manual run through GitHub UI
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "Fastlane lane to execute"
+        required: true
+        default: "internal"
+        type: choice
+        options:
+          - distribute # Distribute to Firebase App Distribution
+          - internal
+          - alpha
+          - beta
+          - promote_to_production
+          - production
+
+env:
+  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_CHANNEL: "stable"
+  JAVA_VERSION: "11"
+  JAVA_DISTRIBUTION: "temurin"
+  RUBY_VERSION: "3.3"
+  WORKING_DIR: "android"
+
+jobs:
+  build-android:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      # Needed for proper version tagging
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: "gradle"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          #cache: true
+          #cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
+          #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          flutter-version: ${{ env.FLUTTER_VERSION }} # TODO: Use latest version
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Setup Flutter Dependencies
+        run: flutter pub get
+
+      - name: Analyze Code
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Create Environment Variables File
+        run: echo "ENV_VAR1=$ENV_VAR1" > .env
+        env:
+          ENV_VAR1: ${{ secrets.ENV_VAR1 }}
+
+        # NOTE: Convert keystore.properties to base64: `base64 -i android/upload-keystore.jks`
+        # and add it to github secrets
+
+      - name: Decode Keystore
+        env:
+          PLAY_STORE_UPLOAD_KEY: ${{ secrets.PLAY_STORE_UPLOAD_KEY }}
+        run: |
+          echo "$PLAY_STORE_UPLOAD_KEY" | base64 --decode > android/upload-keystore.jks
+
+      - name: Configure signing
+        env:
+          KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
+          KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          cat > android/keystore.properties <<EOF
+          storePassword=${KEYSTORE_STORE_PASSWORD}
+          keyPassword=$KEYSTORE_KEY_PASSWORD
+          keyAlias=$KEYSTORE_KEY_ALIAS
+          storeFile=android/upload-keystore.jks
+          EOF
+
+        working-directory: ${{ env.WORKING_DIR }}
+
+      # Setup Ruby, Bundler, and Gemfile dependencies
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Build and Deploy with Fastlane
+        run: |
+          echo "$PLAY_STORE_CONFIG_JSON" > flutter-ci-432e4-b2e456c83eaa.json
+          # Validate flutter-ci-432e4-b2e456c83eaa.json
+          fastlane run validate_play_store_json_key json_key:flutter-ci-432e4-b2e456c83eaa.json
+          bundle install
+          bundle exec fastlane ${{ github.event.inputs.lane || 'internal' }}
+        env:
+          PLAY_STORE_CONFIG_JSON: ${{ secrets.PLAY_STORE_CONFIG_JSON }}
+          FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+          FIREBASE_CLI_TOKEN: ${{ secrets.FIREBASE_CLI_TOKEN }}
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Upload App Bundle
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-bundle
+          path: build/app/outputs/bundle/release/*.aab
+          retention-days: 90
+
+      - name: Upload APK Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: apk-releases
+          path: build/app/outputs/flutter-apk/*.apk*
+          retention-days: 90
+
+      - name: Prepare native-debug-symbols ZIP File
+        if: always()
+        run: |
+          cd build/app/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib/ &&
+          zip -r native-debug-symbols.zip */
+        shell: bash
+
+      - name: Upload native debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: debug-symbols
+          path: build/app/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib/native-debug-symbols.zip
+          retention-days: 90
+
+      - name: Cleanup keystore
+        if: always()
+        run: rm -f android/upload-keystore.jks android/keystore.properties

@@ -1,0 +1,171 @@
+name: Build MacOS
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IDENTIFIER: "dev.soufianes.flutter_app1"
+  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_CHANNEL: "stable"
+
+jobs:
+  build-macos:
+    name: Build & Package
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Extract metadata from pubspec.yaml
+        id: meta
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Create .env from GitHub secrets
+        run: |
+          cat > .env <<EOF
+          ENV_VAR1=${{ secrets.ENV_VAR1 }}
+          EOF
+
+      # - name: Verify Formatting
+      #   run: dart format --output=none --set-exit-if-changed .
+
+      # - name: Run Tests
+      #   run: flutter test
+
+      - name: Build macOS
+        run: |
+          flutter build macos \
+            --release \
+            --dart-define-from-file=.env \
+            --obfuscate \
+            --split-debug-info=build/macos/symbols \
+            --build-name=${{ env.APP_VERSION }} \
+            --build-number=${{ env.BUILD_NUMBER }} \
+            --target lib/main.dart
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-debug-symbols-${{ env.APP_VERSION }}
+          path: build/macos/symbols
+          if-no-files-found: ignore # To silently skip
+          retention-days: 14
+
+      - name: Package DMG + PKG
+        run: |
+          set -euo pipefail
+
+          APP_PATH="build/macos/Build/Products/Release/${{ env.APP_NAME }}.app"
+          test -d "$APP_PATH" || { echo "::error::App bundle not found"; exit 1; }
+
+          # Create DMG
+          DMG_ROOT="build/macos/dmg"
+          DMG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}.dmg"
+          rm -rf "$DMG_ROOT" "$DMG_NAME"
+          mkdir -p "$DMG_ROOT"
+          # Copy application
+          cp -R "$APP_PATH" "$DMG_ROOT/"
+          # Create Application shortcut
+          ln -s /Applications "$DMG_ROOT/Applications"
+          hdiutil create \
+            -volname "${{ env.APP_NAME }}" \
+            -srcFolder "$DMG_ROOT" \
+            -format UDZO \
+            -ov \
+            -o "$DMG_NAME"
+          echo "✅ Successfully Created DMG: $DMG_NAME"
+
+          # Create PKG
+          PKG_ROOT="build/macos/pkg"
+          PKG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-installer.pkg"
+          rm -rf "$PKG_ROOT" "$PKG_NAME"
+          mkdir -p "$PKG_ROOT"
+          cp -R "$APP_PATH" "$PKG_ROOT/"
+          pkgbuild \
+            --root "$PKG_ROOT" \
+            --identifier "${{ env.IDENTIFIER }}" \
+            --version "${{ env.APP_VERSION }}" \
+            --install-location "/Applications" \
+            "$PKG_NAME"
+          echo "✅ Successfully Created PKG: $PKG_NAME"
+
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+          echo "PKG_NAME=$PKG_NAME" >> "$GITHUB_ENV"
+
+      - name: Smoke-test packages
+        run: |
+          set -euo pipefail
+          file "${{ env.DMG_NAME }}"
+          pkgutil --check-signature "${{ env.PKG_NAME }}" || true # unsigned is expected
+          echo "✅ Packages created"
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-installers-${{ env.APP_VERSION }}
+          path: |
+            ${{ env.DMG_NAME }}
+            ${{ env.PKG_NAME }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Clean up .env
+        if: always()
+        run: rm -f .env

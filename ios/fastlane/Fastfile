@@ -1,0 +1,268 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+default_platform(:ios)
+
+platform :ios do
+  # TODO: Add environment variables to your CI pip
+  ENV_VALID_KEYS = %w[
+    APP_IDENTIFIER
+    PROVISIONING_PROFILE_NAME
+    APPLE_ID
+    TEAM_ID
+    BUILD_NAME
+    BUILD_NUMBER
+  ]
+
+  BUILD_NAME = ENV["BUILD_NAME"] || "0.1.0"
+  BUILD_NUMBER = latest_testflight_build_number + 1
+
+  # Paths
+  IOS_PROJECT_DIR = "./ios"
+  PODFILE_PATH = File.join(IOS_PROJECT_DIR, "Podfile")
+  XCODEPROJ_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcodeproj")
+  XCODE_WORKSPACE_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcworkspace")
+  OUTPUT_DIR = "./build/ios"
+
+  # Ensure all required environment variables are set
+  def validate_env_vars!
+    ENV_VALID_KEYS.each do |var|
+      UI.user_error!("Missing environment variable #{var} Please set it in your CI/CD pipeline or shell.") unless ENV[var]
+    end
+  end
+
+  before_all do
+    validate_env_vars!
+
+    # Install CocoaPods dependencies
+    UI.message("Installing CocoaPods dependencies...")
+    cocoapods(
+      clean_install: true,
+      podfile: PODFILE_PATH
+    )
+    UI.success("CocoaPods dependencies installed.")
+  end
+
+  private_lane :clean_builds do
+    UI.message("Cleaning builds...")
+    sh "flutter clean"
+    sh "flutter pub get"
+  end
+
+  private_lane :scan_for_secrets do
+    # git-secrets is used to detect secrets
+    sh "git secrets --scan"
+    UI.message("No secrets detected in code")
+  rescue => e
+    UI.user_error!("Secrets detected in code: #{e.message}")
+  end
+
+  private_lane :audit_dependencies do
+    UI.message("Auditing Flutter dependencies...")
+
+    # Check unknown vulnerabilities
+    sh "flutter pub deps --style=compact"
+  end
+
+  private_lane :check_dependencies do
+    UI.message("Checking dependencies...")
+
+    sh "flutter pub get"
+
+    # Verify dependency integrity
+    sh "dart analyze --fatal-infos ."
+
+    UI.message("Dependency status checked")
+  end
+
+  private_lane :run_code_analysis do
+    UI.message("Running code analysis...")
+
+    sh "flutter analyze"
+
+    sh "dart analyze --fatal-infos ."
+
+    UI.message("Code analysis passed")
+  end
+
+  private_lane :run_tests_with_coverage do
+    UI.message("Running tests with coverage...")
+    sh "flutter test --coverage"
+
+    UI.message("Tests passed")
+  end
+
+  private_lane :flutter_test do
+    run_tests_with_coverage
+  end
+
+  # desc "Run Flutter integration tests"
+  # private_lane :flutter_integration_test do
+  #   UI.message("Running Flutter integration tests...")
+  #   sh "flutter test integration_test"
+  #   UI.success("Flutter integration tests finished successfully.")
+  # end
+
+  # Private lane to build iOS app with Flutter
+  # Options:
+  # :flavor (String): The Flutter flavor (e.g., "prod", "dev"). Defaults to "prod"
+  # :export_method (String): The Xcode export method (e.g., "development", "app-store", "ad-hoc", "enterprise"). Defaults to "development"
+  # :build_number (String): The build number for the archive. Required
+  private_lane :flutter_build_ios do |options|
+    clean_builds
+
+    flavor = options[:flavor] || "prod"
+    export_method = options[:export_method] || "development"
+    build_number = options[:build_number] || BUILD_NUMBER
+    scheme = (flavor == "prod") ? "Runner" : "Runner-#{flavor}"
+
+    # unless ENV["APP_IDENTIFIER"] && ENV["PROVISIONING_PROFILE_NAME"]
+    #   UI.user_error!("APP_IDENTIFIER and PROVISIONING_PROFILE_NAME must be set in your environment variables.")
+    # end
+
+    UI.message("Building Flutter iOS app with flavor #{flavor}, export method: #{export_method}, Build number: #{build_number}...")
+    # Build the Flutter iOS app (no codesign as gym will handle it)
+    sh("flutter build ios --#{flavor} --release --obfuscate --split-debug-info=ios/debug-info --dart-define-from-file=.env --build-number=#{build_number} --no-codesign")
+
+    # Build the Xcode archive using gym
+    gym(
+      workspace: XCODE_WORKSPACE_PATH,
+      scheme: scheme,
+      clean: true,
+      export_method: export_method,
+      output_directory: OUTPUT_DIR,
+      output_name: "#{flavor}_#{build_number}.ipa", # Include build number in output name
+      # When using match, gym usually picks up the correct provisioning profile automatically
+      # You can explicitly specify provisioningProfiles if needed, but match simplifies this.
+      export_options: {
+        provisioningProfiles: {
+          ENV["APP_IDENTIFIER"] => ENV["PROVISIONING_PROFILE_NAME"]
+          # e.g., "com.yourcompany.yourapp" => "match AppStore com.yourcompany.yourapp"
+        }
+      }
+    )
+
+    UI.success("iOS app built successfully. to #{File.join(OUTPUT_DIR, "#{flavor}_#{build_number}.ipa")}")
+  end
+
+  # Build the iOS app in debug mode
+  desc "Build the iOS app in debug (development) mode"
+  lane :build_debug do
+    current_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
+    UI.message("Debug build: current build number set to #{current_build_number}")
+
+    # Ensure development match profiles are available if not done before_all
+    match(type: "development", git_url: ENV["MATCH_GIT_URL"], readonly: is_ci?)
+
+    flutter_build_ios(
+      flavor: "dev",
+      export_method: "development",
+      build_number: current_build_number
+    )
+  end
+
+  # Build the iOS app in release mode
+  desc "Build the iOS app in release (App Store) mode"
+  lane :build_release do
+    current_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
+    UI.message("Release build: current build number set to #{current_build_number}")
+
+    # Ensure appstore match profiles are available if not done before_all
+    match(type: "appstore", git_url: ENV["MATCH_GIT_URL"], readonly: is_ci?)
+
+    flutter_build_ios(
+      flavor: "prod",
+      export_method: "app-store",
+      build_number: current_build_number
+    )
+  end
+
+  desc "Submit a new beta build to TestFlight"
+  lane :beta do
+    # Get the latest build number and increment it for the new Build
+    # Handle the case where there are no previous TestFlight builds
+    begin
+      next_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
+    rescue
+      UI.warning("Could not determine latest TestFlight build number: #{next_build_number}")
+      next_build_number = 1 # Start from 1 if no existing builds are found
+    end
+
+    UI.message("Preparing to submit to TestFlight with build number: #{next_build_number}")
+
+    # Increment the build number in Xcode project (optional can be dione by gym/flutter build if passed correctly)
+    # This ensures the .xcodeproj file also reflects the build number.
+
+    increment_build_number(
+      build_number: next_build_number,
+      xcodeproj: XCODEPROJ_PATH
+    )
+
+    # Build the release version of the app
+    # The `flutter_build_ios` lane will use the `next_build_number`
+    flutter_build_ios(
+      flavor: "prod",
+      export_method: "app-store", # TestFlight builds usually use "app-store" export method
+      build_number: next_build_number
+    )
+
+    # Upload to TestFlight
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true, # Speeds up the lane execution
+      # TODO:
+      apple_id: ENV["APPLE_ID"], # e.g., "your_apple_id@email.com"
+      team_id: ENV["TEAM_ID"] # "YOUR_TEAM_ID"
+      # groups: ["testers"], Optional: Specify tester groups
+      # changelog: "Beta build for testing." # Optional: Add a changelog message
+    )
+    UI.success("Successfully uploaded new beta build to TestFlight!")
+  end
+
+  # Deploy to App Store
+  desc "Deploy a new version to the App Store"
+  lane :deploy do
+    # TODO: `fastlane deliver` to upload metadata
+    # Increment version number (you might want to use semantic versioning)
+    increment_version_number(
+      version_number: BUILD_NAME, # TODO: Replace with your versioning logic
+      xcodeproj: XCODEPROJ_PATH
+    )
+    # Build the release
+    build_release
+    # Upload to the App Store Connect
+    upload_to_app_store(
+      skip_metadata: true,
+      skip_screenshots: true,
+      apple_id: ENV["APPLE_ID"], # e.g., "your_apple_id@email.com"
+      team_id: ENV["TEAM_ID"] # "YOUR_TEAM_ID"
+    )
+  end
+
+  desc "Description of what the lane does"
+  lane :custom_lane do
+    # add actions here: https://docs.fastlane.tools/actions
+  end
+
+  after_all do
+    puts "Fastlane finished successfully!"
+  end
+
+  error do |lane, exception|
+    UI.error("Error in lane: #{lane}")
+    UI.error(exception.message)
+  end
+end
+
+# TODO: https://gemini.google.com/app/b4d2abe82796dd0e

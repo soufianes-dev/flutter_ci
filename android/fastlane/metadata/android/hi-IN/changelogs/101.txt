@@ -1,0 +1,3 @@
+- Fixed crash on login screen
+- Improved performance on older devices
+- Added Spanish language support

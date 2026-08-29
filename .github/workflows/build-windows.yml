@@ -1,0 +1,456 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  APP_TITLE: "Flutter App1"
+  APP_PUBLISHER: "Soufiane Saadouni"
+  IDENTIFIER: "dev.soufianes.flutter-app1"
+  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_CHANNEL: "stable"
+
+jobs:
+  build-windows:
+    name: Build MSIX + Inno Setup (${{ matrix.arch }})
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runs-on: windows-latest
+            flutter_arch: x64
+            msix_arch: x64
+            inno_archs_allowed: x64compatible
+            inno_archs_install: x64compatible
+
+          # TODO windows-11-arm is free for public repositories (and not private repos)
+          # - arch: arm64
+          #   runs-on: windows-11-arm # native Arm runner
+          #   flutter_arch: arm64
+          #   msix_arch: arm64
+          #   inno_archs_allowed: arm64
+          #   inno_archs_install: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Extract metadata from pubspec.yaml
+        shell: bash
+        id: meta
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: ${{ matrix.flutter_arch }}
+          cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            %LOCALAPPDATA%\Pub\Cache
+            .dart_tool
+          key: ${{ runner.os }}-${{ matrix.arch }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.arch }}-pub-
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Create .env from GitHub Secrets
+        shell: bash
+        run: |
+          cat > .env <<EOF
+          ENV_VAR1=${{ secrets.ENV_VAR1 }}
+          EOF
+
+      # - name: Verify Formatting
+      #   run: dart format --output=none --set-exit-if-changed .
+
+      # - name: Run Tests
+      #   run: flutter test
+
+      - name: Build unsigned MSIX (for Windows Store)
+        shell: pwsh
+        run: |
+          # Guard: logo must exist
+          if (-not (Test-Path "assets/logo.png")){
+            Write-Error "::error::assets/logo.png not found - required by msix"
+            exit 1
+          }
+
+          dart run msix:create `
+          --architecture "${{ matrix.msix_arch }}" `
+          --display-name "${{ env.APP_TITLE }}" `
+          --publisher "${{ secrets.WINDOWS_PUBLISHER_ID }}" `
+          --publisher-display-name "${{ env.APP_PUBLISHER }}" `
+          --identity-name "${{ env.IDENTIFIER }}" `
+          --logo-path "assets/logo.png" `
+          --capabilities "internetClient, location, microphone, webcam" `
+          --languages "en-us" `
+          --file-extension "picture,image" `
+          --protocol-activation "http,https" `
+          --execution-alias "${{ env.APP_NAME }}" `
+          --store true `
+          --windows-build-args "--release --dart-define-from-file=.env --obfuscate --split-debug-info=build/windows/symbols/${{ matrix.arch }} --build-name=${{ env.APP_VERSION }} --build-number=${{ env.BUILD_NUMBER }} --target lib/main.dart"
+
+          # Confirm MSIX actually appeared
+          $msix = Get-ChildItem -Path "build/windows/${{ matrix.arch }}/runner/Release" -Filter "*.msix" -ErrorAction SilentlyContinue
+          if (-not $msix) {
+            Write-Error "::error::No .msix file was produced"
+            exit 1
+          }
+          Write-Host "✅ MSIX created: $($msix.Name)"
+
+      - name: Upload MSIX
+        uses: actions/upload-artifact@v7
+        with:
+          name: msix-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}
+          path: "build/windows/${{ matrix.arch }}/runner/Release/*.msix"
+          retention-days: 30
+          if-no-files-found: error
+
+      # - name: Configure Microsoft Store CLI
+      #   uses: microsoft/microsoft-store-apppublisher@v1.4
+
+      # - name: Configure Store Credentials
+      #   shell: pwsh
+      #   run: |
+      #     mssstore reconfigure `
+      #       --tenantId "${{ secrets.AZURE_AD_TENANT_ID }}" `
+      #       --sellerId "${{ secrets.SELLER_ID }}" `
+      #       --clientId "${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}" `
+      #       --clientSecret "${{ secrets.AZURE_AD_APPLICATION_SECRET }}"
+
+      # - name: Publish to Microsoft Store
+      #   shell: pwsh
+      #   run: |
+      #     mssstore publish `
+      #       "${{ github.workspace }}/build/windows/x64/runner/Release/${{ env.APP_NAME }}-v${{ env.APP_VERSION }}.msix" `
+      #       -id "${{ secrets.MICROSOFT_STORE_APP_ID }}"
+
+      # - name: Sign Built Binary with Signtool & Export CER
+      #   shell: powershell
+      #   run: |
+      #     # 1. Decode PFX from GitHub Secrets (from base 64 → .pfx file)
+      #     $pfxPath = "$env:TEMP\cert.pfx"
+      #     $bytes = [System.Convert]::FromBase64String("${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}")
+      #     [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
+
+      #     #2. Extract public .cer file directly for Inno Setup
+      #     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, "${{ secrets.WINDOWS_CERT_PASSWORD }}")
+      #     [System.IO.File]::WriteAllBytes("FlutterAppCodeSignCert.cer", $cert.Export([System.Security.Cryptography.X509CertificateContentType]::Cert))
+
+      #     # 3. Find the highest SDK version folder under bin
+      #     $sdkBin = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+      #       Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+      #       Sort-Object { [Version]$_.Name } -Descending |
+      #       Select-Object -First 1
+
+      #     $signtool = Join-Path $sdkBin.FullName "x64\signtool.exe"
+
+      #     # 4. Sign the executable
+      #     & $signtool sign /fd SHA256 /f $pfxPath /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /tr http://timestamp.digicert.com /td SHA256 "build\windows\x64\runner\Release\${{ env.APP_NAME }}.exe"
+
+      #     # 5. Clean up PFX file from runner disk
+      #     Remove-Item -Path $pfxPath -Force
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-debug-symbols-${{ env.APP_VERSION }}-${{ matrix.arch }}
+          path: build/windows/symbols/${{ matrix.arch }}
+          if-no-files-found: ignore # To silently skip
+          retention-days: 14
+
+      - name: Cache Chocolatey / Inno Setup
+        uses: actions/cache@v6
+        with:
+          path: |
+            C:\ProgramData\chocolatey\bin
+            C:\ProgramData\chocolatey\lib
+          key: ${{ runner.os }}-${{ matrix.arch }}-choco-innosetup-v1
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Generate Inno Setup Script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          YEAR=$(date +%Y)
+          echo "YEAR=$YEAR" >> "$GITHUB_ENV"
+
+          cat > windows_installer.iss << 'EOF'
+          ; Auto-generated by GitHub Actions - do not edit manually
+          #define MyAppName      "${{ env.APP_TITLE }}"
+          #define MyAppVersion   "${{ env.APP_VERSION }}"
+          #define MyAppPublisher "${{ env.APP_PUBLISHER }}"
+          #define MyAppExeName   "${{ env.APP_NAME }}.exe"
+          #define MyAppId        "{{E99ECF80-C4EF-445A-A92F-732BF4627EA0}}"
+
+          [Setup]
+          ; Generate GUID:
+          ;   PowerShell: [guid]::NewGuid().ToString().ToUpper()
+          ;   Bash: uuidgen
+          ; NOTE: Use the exact same GUID for every future release of this app
+          ; NOTE: Keep it hardcoded
+          AppId={#MyAppId}
+          AppName={#MyAppName}
+          AppVersion={#MyAppVersion}
+          AppPublisher={#MyAppPublisher}
+          AppPublisherURL=https://github.com/${{ github.repository }}
+          AppSupportURL=https://github.com/${{ github.repository }}/issues
+          VersionInfoVersion={#MyAppVersion}
+          VersionInfoCompany={#MyAppPublisher}
+          VersionInfoDescription={#MyAppName} Installer
+          VersionInfoCopyright=(C) ${{ env.YEAR }} {#MyAppPublisher}
+          DefaultDirName={autopf}\\${{ env.APP_NAME }}
+          DefaultGroupName={#MyAppName}
+          ; Cleaner UX
+          DisableProgramGroupPage=yes
+          OutputDir=.
+          OutputBaseFilename=${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}-setup
+          Compression=lzma2/ultra64
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=admin
+          ArchitecturesAllowed=${{ matrix.inno_archs_allowed }}
+          ArchitecturesInstallIn64BitMode=${{ matrix.inno_archs_install }}
+          UninstallDisplayIcon={app}\\{#MyAppExeName}
+          ; Closes running app before upgrade
+          CloseApplications=yes
+          RestartApplications=no
+          ; Uncomment for silent installs (winget, choco friendly)
+          ; SilentInstall=1 
+
+          [Languages]
+          Name: "english"; MessagesFile: "compiler:Default.isl"
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
+
+          [Files]
+          Source: "build\\windows\\${{ matrix.arch }}\\runner\\Release\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{group}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"
+          Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon
+
+          [Run]
+          ; Launch the main application executable after setup finishes
+          Filename: "{app}\\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+          EOF
+
+          echo "✅ windows_installer.iss generated"
+
+      - name: Build Inno setup installer
+        run: |
+          ISCC.exe "windows_installer.iss"
+
+      - name: Verify installer
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INSTALLER="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}-setup.exe"
+          if [ ! -s "$INSTALLER" ]; then
+            echo "::error:: Installer missing or empty!"
+            exit 1
+          fi
+          file "$INSTALLER" || true
+          echo "✅ Installer verified"
+
+      # - name: Sign Generated Installer
+      #   shell: powershell
+      #   run: |
+      #     # 1. Decode PFX from GitHub Secrets (from base 64 → .pfx file)
+      #     $pfxPath = "$env:TEMP\cert.pfx"
+      #     $bytes = [System.Convert]::FromBase64String("${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}")
+      #     [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
+
+      #     #2. Extract public .cer file directly for Inno Setup
+      #     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, "${{ secrets.WINDOWS_CERT_PASSWORD }}")
+      #     [System.IO.File]::WriteAllBytes("FlutterAppCodeSignCert.cer", $cert.Export([System.Security.Cryptography.X509CertificateContentType]::Cert))
+
+      #     # 3. Find the highest SDK version folder under bin
+      #     $sdkBin = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+      #       Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+      #       Sort-Object { [Version]$_.Name } -Descending |
+      #       Select-Object -First 1
+
+      #     $signtool = Join-Path $sdkBin.FullName "x64\signtool.exe"
+
+      #     # 4. Sign the executable
+      #     & $signtool sign /fd SHA256 /f $pfxPath /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /tr http://timestamp.digicert.com /td SHA256 "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-setup.exe"
+
+      #     # 5. Clean up PFX file from runner disk
+      #     Remove-Item -Path $pfxPath -Force
+
+      - name: Upload Inno Installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-${{ matrix.arch }}-installer-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}
+          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}-setup.exe"
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Add NSIS to PATH
+        shell: pwsh
+        run: |
+          $paths = @(
+            "${env:ProgramFiles(x86)}\NSIS",
+            "${env:ProgramFiles}\NSIS",
+            "C:\ProgramData\chocolatey\bin"
+          )
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              echo $p | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              Write-Host "Added to PATH: $p"
+            }
+          }
+
+      - name: Generate NSIS script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > installer.nsi << 'EOF'
+          ; Auto-generated by GitHub Actions
+
+          !include "MUI2.nsh"
+
+          !define APPNAME "${{ env.APP_NAME }}"
+          !define VERSION "${{ env.APP_VERSION }}"
+          !define COMPANY "${{ env.APP_PUBLISHER }}"
+          !define ARCH    "${{ matrix.arch }}"
+
+          Name "${APPNAME}"
+          OutFile "${APPNAME}-${VERSION}-${ARCH}-Installer.exe"
+          InstallDir "$PROGRAMFILES\\${APPNAME}"
+          RequestExecutionLevel admin
+          Unicode True
+
+          ; ----- Modern UI settings -----
+          !define MUI_ABORTWARNING
+          !define MUI_ICON "${NSISDIR}\\Contrib\\Graphics\\Icons\\modern-install.ico"
+          !define MUI_UNICON "${NSISDIR}\\Contrib\\Graphics\\Icons\\modern-uninstall.ico"
+
+          ; Optional: custom header/welcome bitmaps (place files in repo)
+          ; !define MUI_HEADERIMAGE
+          ; !define MUI_HEADERIMAGE_BITMAP "assets\\nsis-header.bmp"
+          ; !define MUI_WELCOMEFINISHPAGE_BITMAP "assets\\nsis-wizard.bmp"
+
+          ; ----- Pages -----
+          !insertmacro MUI_PAGE_WELCOME
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !insertmacro MUI_PAGE_FINISH
+
+          !insertmacro MUI_UNPAGE_CONFIRM
+          !insertmacro MUI_UNPAGE_INSTFILES
+
+          ; ----- Language -----
+          !insertmacro MUI_LANGUAGE "English"
+
+          ; ----- Install section -----
+          Section "Install"
+            SetOutPath $INSTDIR
+            File /r "build\windows\${{ matrix.arch }}\runner\Release\*.*"
+
+            ; Create Menu Shortcut
+            CreateDirectory "$SMPROGRAMS\${APPNAME}"
+            CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\${APPNAME}.exe"
+
+            ; Desktop shortcut
+            CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${APPNAME}.exe"
+
+            ; Uninstaller
+            WriteUninstaller "$INSTDIR\Uninstall.exe"
+            
+            ; Add/remove Programs entry
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+              "DisplayName" "${APPNAME}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+              "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+              "DisplayVersion" "${VERSION}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
+              "Publisher" "${COMPANY}"
+          SectionEnd
+
+          ; ----- Uninstall section -----
+          Section "Uninstall"
+            Delete "$INSTDIR\Uninstall.exe"
+            RMDir /r "$INSTDIR"
+            Delete "$DESKTOP\${APPNAME}.lnk"
+            RMDir /r "$SMPROGRAMS\${APPNAME}"
+            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
+          SectionEnd
+          EOF
+
+          echo "✅ Modern UI installer.nsi generated for ${{ matrix.arch }}"
+
+        # Compile NSIS installer
+      - name: Package with NSIS
+        run: makensis installer.nsi
+
+      - name: Upload NSIS Installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: nsis-windows-installer-${{ matrix.arch }}-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}
+          path: "${{ env.APP_NAME }}-${{ env.APP_VERSION }}-${{ matrix.arch }}-Installer.exe"
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Clean up .env
+        if: always()
+        shell: bash
+        run: rm -f .env

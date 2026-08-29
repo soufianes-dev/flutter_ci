@@ -1,0 +1,3 @@
+- New profile customization options
+- Dark mode support added
+- Share functionality improved

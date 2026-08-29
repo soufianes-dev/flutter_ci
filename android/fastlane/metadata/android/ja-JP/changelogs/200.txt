@@ -1,0 +1,12 @@
+NEW FEATURES:
+- Complete UI redesign
+- Offline mode now available
+- New premium subscription options
+
+IMPROVEMENTS:
+- 2x faster loading times 
+- Reduced battery usage
+
+BUG FIXES:
+- Fixed sync issues with cloud storage
+- Resolved notification delay problems

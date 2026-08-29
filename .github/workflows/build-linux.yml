@@ -1,0 +1,417 @@
+name: Build Linux
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  APP_PUBLISHER: "Soufiane Saadouni"
+  IDENTIFIER: "dev.soufianes.flutter_app1"
+  DEBIAN_PACKAGE_NAME: "flutter-app1"
+  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_CHANNEL: "stable"
+
+jobs:
+  build-debian-and-appimage:
+    name: Debian + AppImage (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false # One arch failing should not cancel the other
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            flutter_arch: x64
+            deb_arch: amd64
+            appimagetool: appimagetool-x86_64.AppImage
+
+          # - arch: aarch64
+          # TODO: ubuntu-24.04-arm is free for public repositories (and not private repos)
+          #   runner: ubuntu-24.04-arm # native ARM runner
+          #   flutter_arch: arm64
+          #   deb_arch: arm64
+          #   appimagetool: appimagetool-aarch64.AppImage
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Extract metadata from pubspec.yaml
+        id: meta
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+          echo "name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate required assets
+        run: |
+          set -euo pipefail
+          test -f assets/logo.png || { echo "::error::assets/logo.png is required for AppImage"; exit 1; }
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev \
+            appstream zip wget
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-${{ matrix.arch }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.arch }}-pub-
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Create .env from GitHub secrets
+        run: |
+          cat > .env <<EOF
+          ENV_VAR1=${{ secrets.ENV_VAR1 }}
+          EOF
+
+      - name: Build Linux (release)
+        run: |
+          flutter build linux \
+            --release \
+            --dart-define-from-file=.env \
+            --obfuscate \
+            --split-debug-info=build/linux/symbols \
+            --build-name=${{ env.APP_VERSION }} \
+            --build-number=${{ env.BUILD_NUMBER }} \
+            --target lib/main.dart
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-debug-symbols-${{ matrix.arch }}-${{ env.APP_VERSION }}
+          path: build/linux/symbols
+          if-no-files-found: ignore # To silently skip
+          retention-days: 14
+
+      - name: Install appimagetool
+        run: |
+          wget -q -O ${{ matrix.appimagetool }} \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/${{ matrix.appimagetool }}"
+          chmod +x ${{ matrix.appimagetool }}
+          sudo mv ${{ matrix.appimagetool }} /usr/local/bin/appimagetool
+
+      - name: Create AppImage
+        run: |
+          set -euo pipefail
+
+          BUNDLE_DIR="build/linux/${{ matrix.flutter_arch }}/release/bundle"
+          if [[ ! -d "$BUNDLE_DIR" ]]; then
+            echo "::error::Flutter bundle not found at $BUNDLE_DIR"
+            exit 1
+          fi
+
+          # Create AppDir structure
+          APPDIR=AppDir
+          mkdir -p "$APPDIR/usr/bin"
+          cp -r "$BUNDLE_DIR"/* "$APPDIR/usr/bin/"
+
+          # Copy Icon
+          cp "assets/logo.png" "$APPDIR/logo.png"
+          cp "assets/logo.png" "$APPDIR/.DirIcon"
+
+          # Create AppRun
+          cat > "$APPDIR/AppRun" <<EOF
+          #!/bin/sh
+          HERE="\$(dirname "\$(readlink -f "\$0")")"
+          exec "\$HERE/usr/bin/${{ env.APP_NAME }}" "\$@"
+          EOF
+          chmod +x "$APPDIR/AppRun"
+
+          # Create desktop entry
+          cat > "$APPDIR/${{ env.APP_NAME }}.desktop" <<EOF
+          [Desktop Entry]
+          Name=${{ env.APP_NAME }}
+          Version=1.0
+          Exec=${{ env.APP_NAME }} %u
+          Icon=logo
+          Type=Application
+          Categories=Utility;
+          EOF
+
+          # ARCH is used by appimagetool to select the correct runtime
+          export ARCH=${{ matrix.arch }}
+          # Build AppImage
+          APPIMAGE_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}.AppImage"
+          appimagetool --no-appstream AppDir "$APPIMAGE_NAME"
+          echo "APPIMAGE_NAME=$APPIMAGE_NAME" >> "$GITHUB_ENV"
+
+      - name: Build Debian package
+        run: |
+          set -euo pipefail
+
+          sudo apt-get install -y --no-install-recommends dpkg-dev
+
+          BUNDLE_DIR="build/linux/${{ matrix.flutter_arch }}/release/bundle"
+          PKG_DIR="${{ env.DEBIAN_PACKAGE_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}"
+
+          # Create package structure
+          mkdir -p "$PKG_DIR/DEBIAN"
+          mkdir -p "$PKG_DIR/usr/lib/${{ env.DEBIAN_PACKAGE_NAME }}"
+          mkdir -p "$PKG_DIR/usr/bin"
+
+          # Copy full bundle to usr/lib
+          cp -r "$BUNDLE_DIR"/* "$PKG_DIR/usr/lib/${{ env.DEBIAN_PACKAGE_NAME }}/"
+
+          # Symlink binary to usr/bin
+          ln -s "/usr/lib/${{ env.DEBIAN_PACKAGE_NAME }}/${{ env.APP_NAME }}" \
+            "$PKG_DIR/usr/bin/${{ env.APP_NAME }}"
+
+          cat > "$PKG_DIR/DEBIAN/control" <<EOF
+          Package: ${{ env.DEBIAN_PACKAGE_NAME }}
+          Version: ${{ env.APP_VERSION }}
+          Architecture: ${{ matrix.deb_arch }}
+          Maintainer: ${{ env.APP_PUBLISHER }} <soufianes.pro@gmail.com>
+          Description: Flutter Linux application ${{ matrix.arch }}
+          Section: utils
+          Priority: optional
+          EOF
+
+          # Build package
+          dpkg-deb --build --root-owner-group "$PKG_DIR"
+          echo "DEB_NAME=${PKG_DIR}.deb" >> "$GITHUB_ENV"
+
+      - name: Smoke-test packages
+        run: |
+          set -euo pipefail
+          file "${{ env.APPIMAGE_NAME }}"
+          dpkg-deb -I "${{ env.DEB_NAME }}"
+          echo "✅ Packages look valid ${{ matrix.arch }}"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages-${{ matrix.arch }}-${{ env.APP_VERSION }}
+          path: |
+            ${{ env.APPIMAGE_NAME }}
+            ${{ env.DEB_NAME }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Clean .env
+        if: always()
+        run: rm -f .env
+
+  build-fedora:
+    name: Fedora RPM (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    container: fedora:latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            flutter_arch: x64
+            rpm_arch: x86_64
+
+          # - arch: aarch64
+          # TODO: ubuntu-24.04-arm is free for public repositories (and not private repos)
+          #   runner: ubuntu-24.04-arm
+          #   flutter_arch: arm64
+          #   rpm_arch: aarch64
+
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            clang cmake ninja-build pkg-config gtk3-devel \
+            gcc-c++ glib2-devel libcurl-devel openssl-devel libsecret-devel \
+            libblkid-devel jsoncpp-devel libstdc++-devel libstdc++-static \
+            wget unzip tar rpm-build git jq which
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Extract metadata from pubspec.yaml
+        id: meta
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-${{ matrix.arch }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.arch }}-pub-
+
+      - name: Create .env from GitHub secrets
+        run: |
+          cat > .env <<EOF
+          ENV_VAR1=${{ secrets.ENV_VAR1 }}
+          EOF
+
+      - name: Build Linux  (release)
+        run: |
+          # Workaround for Flutter bug: CMake install fails when
+          # build/native_assets/linux does not exist (no native assets).
+          # See https://github.com/flutter/flutter/issues/159199#issue-2675961578
+          mkdir -p build/native_assets/linux
+
+          flutter build linux \
+            --release \
+            --dart-define-from-file=.env \
+            --obfuscate \
+            --split-debug-info=build/linux/symbols \
+            --build-name=${{ env.APP_VERSION }} \
+            --build-number=${{ env.BUILD_NUMBER }} \
+            --target lib/main.dart
+
+      - name: Package RPM
+        run: |
+          set -euo pipefail
+
+          BUNDLE_DIR="build/linux/${{ matrix.flutter_arch }}/release/bundle"
+          if [[ ! -d "$BUNDLE_DIR" ]]; then
+            echo "::error::Flutter bundle not found at $BUNDLE_DIR"
+            exit 1
+          fi
+
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          cp -r "$BUNDLE_DIR" rpmbuild/SOURCES/app
+
+          cat > rpmbuild/SPECS/app.spec <<EOF
+          %global debug_package %{nil}
+
+          Name:       ${{ env.APP_NAME }}
+          Version:    ${{ env.APP_VERSION }}
+          Release:    1%{?dist}
+          Summary:    Flutter Linux application
+          License:    Proprietary # TODO
+          Source0:    app
+          BuildArch:  ${{ matrix.rpm_arch }}
+
+          %description
+          ${{ env.APP_NAME }} packaged for Fedora ${{ matrix.arch }}
+
+          %prep
+          %setup -q -c -T
+
+          %install
+          mkdir -p %{buildroot}/usr/lib/${{ env.APP_NAME }}
+          mkdir -p %{buildroot}/usr/bin
+
+          # Copy the binary into /usr/bin
+          cp -r %{SOURCE0}/* %{buildroot}/usr/lib/${{ env.APP_NAME }}/
+          ln -sf /usr/lib/${{ env.APP_NAME }}/${{ env.APP_NAME }} \
+            %{buildroot}/usr/bin/${{ env.APP_NAME }}
+
+          %files
+          /usr/bin/${{ env.APP_NAME }}
+          /usr/lib/${{ env.APP_NAME }}
+
+          %changelog
+          * $(date '+%a %b %d %Y') ${{ env.APP_PUBLISHER }} <soufianes.pro@gmail.com> - ${{ env.APP_VERSION }}-1
+          - Automated CI build ${{ matrix.arch }}
+          EOF
+
+          rpmbuild --define "_topdir $PWD/rpmbuild" --bb "rpmbuild/SPECS/app.spec"
+
+      - name: Smoke-test RPM
+        run: |
+          rpm -qp --info rpmbuild/RPMS/${{ matrix.rpm_arch }}/*.rpm
+          echo "✅ RPM looks valid (${{ matrix.arch }})"
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-rpm-${{ matrix.arch }}-${{ env.APP_VERSION }}
+          path: rpmbuild/RPMS/${{ matrix.rpm_arch }}/*.rpm
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Clean .env
+        if: always()
+        run: rm -f .env

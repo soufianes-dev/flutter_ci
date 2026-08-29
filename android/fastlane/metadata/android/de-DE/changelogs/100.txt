@@ -1,0 +1,3 @@
+- Initial release of our awesome app
+- Basic functionality implemented
+- Use authentication system

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="fastlane.lanes">
+    
+    
+    
+      
+      <testcase classname="fastlane.lanes" name="0: default_platform" time="0.000554407">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="1: Switch to android build_android_app lane" time="0.007917473">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="2: Switch to android clean_builds lane" time="0.000387032">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="3: flutter clean" time="11.335138328">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="4: Switch to android build_aab lane" time="0.000478069">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="5: flutter build appbundle --obfuscate --split-debug-info=android/debug-info --dart-define-from-file=.env --build-name=1.0.0 --build-number=1" time="254.225941542">
+        
+      </testcase>
+    
+  </testsuite>
+</testsuites>
