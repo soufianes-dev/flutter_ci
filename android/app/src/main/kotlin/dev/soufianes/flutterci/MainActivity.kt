@@ -1,4 +1,4 @@
-package dev.soufianes.flutter_ci
+package dev.soufianes.flutterci
 
 import io.flutter.embedding.android.FlutterActivity
 
