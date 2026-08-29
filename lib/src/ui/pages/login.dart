@@ -29,25 +29,22 @@ class _LoginState extends State<Login> {
         child: Form(
           key: _formKey,
           child: ListenableBuilder(
-            listenable: Listenable.merge([
-              _emailController,
-              _passwordController,
-            ]),
-            builder: (BuildContext context, Widget? child) {
+            listenable: .merge([_emailController, _passwordController]),
+            builder: (context, child) {
               return AutofillGroup(
                 child: Center(
                   child: SingleChildScrollView(
                     child: Padding(
-                      padding: const EdgeInsets.all(24.0),
+                      padding: const .all(24.0),
                       child: Column(
-                        mainAxisSize: MainAxisSize.max,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.center,
+                        mainAxisSize: .max,
+                        mainAxisAlignment: .center,
+                        crossAxisAlignment: .center,
                         children: [
                           const Text("LOGO"),
                           const SizedBox(height: 16.0),
                           Text(
-                            key: Key("Login"),
+                            key: Key("login"),
                             "Login",
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
@@ -55,13 +52,13 @@ class _LoginState extends State<Login> {
                           TextFormField(
                             key: Key("email"),
                             controller: _emailController,
-                            textInputAction: TextInputAction.next,
-                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: .next,
+                            keyboardType: .emailAddress,
                             autofillHints: [
                               AutofillHints.email,
                               AutofillHints.username,
                             ],
-                            decoration: const InputDecoration(
+                            decoration: const .new(
                               label: Text("Email"),
                               hintText: "example@mail.com",
                               border: OutlineInputBorder(),
@@ -76,11 +73,11 @@ class _LoginState extends State<Login> {
                           TextFormField(
                             key: Key("password"),
                             controller: _passwordController,
-                            textInputAction: TextInputAction.send,
-                            keyboardType: TextInputType.visiblePassword,
+                            textInputAction: .send,
+                            keyboardType: .visiblePassword,
                             obscureText: _isPasswordVisible,
                             autofillHints: [AutofillHints.password],
-                            decoration: InputDecoration(
+                            decoration: .new(
                               label: const Text("Password"),
                               hintText: _isPasswordVisible
                                   ? 'Password'
@@ -114,9 +111,9 @@ class _LoginState extends State<Login> {
                           RichText(
                             text: TextSpan(
                               text: "Forgot Password?",
-                              style: const TextStyle(
+                              style: const .new(
                                 color: Colors.blue,
-                                decoration: TextDecoration.underline,
+                                decoration: .underline,
                               ),
                               recognizer: TapGestureRecognizer()
                                 ..onTap = () {
@@ -153,7 +150,7 @@ class _LoginState extends State<Login> {
                           const SizedBox(height: 8.0),
                           const Text(
                             '- - - Or - - -',
-                            style: TextStyle(color: Colors.grey),
+                            style: .new(color: Colors.grey),
                           ),
                           const SizedBox(height: 16.0),
                           OutlinedButton.icon(
@@ -171,7 +168,7 @@ class _LoginState extends State<Login> {
                           OutlinedButton.icon(
                             onPressed: () {},
                             style: OutlinedButton.styleFrom(
-                              minimumSize: const Size.fromHeight(50.0),
+                              minimumSize: const .fromHeight(50.0),
                               shape: const ContinuousRectangleBorder(),
                             ),
                             icon: const Icon(Icons.abc),
@@ -201,7 +198,7 @@ class _LoginState extends State<Login> {
     try {
       TextInput.finishAutofillContext();
       // Here we emulate signing ip logic
-      await Future.delayed(const Duration(seconds: 2));
+      // TODO: await Future.delayed(const .new(milliseconds: 500));
       if (mounted) context.pushReplacement('/welcome');
 
       // Just for testing

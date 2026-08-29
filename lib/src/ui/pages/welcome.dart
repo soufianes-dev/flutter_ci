@@ -12,7 +12,7 @@ class const Welcome({super.key}) extends StatelessWidget {
           Center(
             child: Text(
               key: Key("welcome"),
-              "Welcome!",
+              "welcome",
               style: .new(fontSize: 36.0),
             ),
           ),

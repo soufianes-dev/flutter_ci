@@ -1,4 +1,4 @@
 appId: "${APP_ID}"
 ---
-- assertVisible: "Welcome!"
+- assertVisible: "welcome"
 - takeScreenshot: "welcome_screen"

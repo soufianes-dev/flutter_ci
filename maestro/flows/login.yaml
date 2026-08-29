@@ -15,7 +15,7 @@ appId: "${APP_ID}"
 - tapOn: 
     text: "password"
 - inputText: "${PASSWORD}"
-- assertVisible: "Login"
+- assertVisible: "login"
 - takeScreenshot: "login_screen2"
 - tapOn: 
     text: "LOGIN"
