@@ -36,12 +36,12 @@ jobs:
             deb_arch: amd64
             appimagetool: appimagetool-x86_64.AppImage
 
-          # - arch: aarch64
+          - arch: aarch64
           # TODO: ubuntu-24.04-arm is free for public repositories (and not private repos)
-          #   runner: ubuntu-24.04-arm # native ARM runner
-          #   flutter_arch: arm64
-          #   deb_arch: arm64
-          #   appimagetool: appimagetool-aarch64.AppImage
+            runner: ubuntu-24.04-arm # native ARM runner
+            flutter_arch: arm64
+            deb_arch: arm64
+            appimagetool: appimagetool-aarch64.AppImage
 
     steps:
       - name: Checkout code
