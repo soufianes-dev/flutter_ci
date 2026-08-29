@@ -1,0 +1,405 @@
+# TODO: https://app.circleci.com/organization/circleci/3TbHDD9h6ossUWcgQSMt5g
+
+# Or trigger from: https://app.circleci.com/pipelines/circleci/3TbHDD9h6ossUWcgQSMt5g/PGMjNE8tvcrBw9d5HDUNd5
+
+version: 2.1
+
+# Use community orbs for better integration
+orbs:
+  flutter: circleci/flutter@3.0.0
+
+parameters:
+  flutter_version:
+    type: string
+    default: "3.47.2"
+  xcode_version:
+    type: string
+    default: "26.4.0" # CircleCI uses full version format
+
+jobs:
+  flutter-ios-setup:
+    macos:
+      # This automatically sets Xcode
+      xcode: << pipeline.parameters.xcode_version >>
+
+    steps:
+      - checkout
+
+      # Xcode is already set by the executor, but verify
+      - run:
+          name: Select Xcode version
+          command: |
+            xcodebuild -version
+            xcode-select -p
+
+      - flutter/install_sdk_and_pub:
+          channel: stable
+          version: << pipeline.parameters.flutter_version >>
+
+      - restore_cache:
+          keys:
+            - flutter-pub-cache-{{ checksum "pubspec.yaml" }}
+            - cocoapods-cache-{{ checksum "ios/Podfile.lock" }}
+
+      - run:
+          name: Install CocoaPods and dependencies
+          command: |
+            flutter pub get
+            (cd ios && pod install --repo-update)
+
+      - save_cache:
+          paths:
+            - ~/.pub-cache
+          key: flutter-pub-cache-{{ checksum "pubspec.yaml" }}
+
+      - save_cache:
+          paths:
+            - ios/Pods
+          key: cocoapods-cache-{{ checksum "ios/fPodfile.lock" }}
+
+      - run:
+          name: Setup iOS project with Ruby script
+          command: |
+            gem install xcodeproj
+            gem install plist
+            ruby ios/setup.rb
+            # Confirm injection worked (optional but smart)
+            grep -E 'PrivacyInfo|GoogleService' ios/Runner.xcodeproj/project.pbxproj || {
+              echo "❌ Resource injection failed!"; exit 1;
+            }
+
+      - run:
+          name: Archive for inspection
+          command: zip -r ios.zip ios/
+
+      - store_artifacts:
+          path: ios.zip
+          destination: ios-setup-artifact
+  flutter-ios-build:
+    macos:
+      # This automatically sets Xcode
+      xcode: << pipeline.parameters.xcode_version >>
+
+    environment:
+      FLUTTER_VERSION: << pipeline.parameters.flutter_version >>
+
+    steps:
+      - checkout
+
+      - flutter/install_sdk_and_pub:
+          channel: stable
+          version: << pipeline.parameters.flutter_version >>
+
+      - restore_cache:
+          keys:
+            - flutter-pub-cache-{{ checksum "pubspec.yaml" }}
+            - cocoapods-cache-{{ checksum "ios/Podfile.lock" }}
+
+      - run:
+          name: Install CocoaPods and dependencies
+          command: |
+            flutter pub get
+            (cd ios && pod install --repo-update)
+
+      - save_cache:
+          paths:
+            - ~/.pub-cache
+          key: flutter-pub-cache-{{ checksum "pubspec.yaml" }}
+
+      - save_cache:
+          paths:
+            - ios/Pods
+          key: cocoapods-cache-{{ checksum "ios/Podfile.lock" }}
+
+      # - run:
+      #     name: Create or select iOS simulator
+      #     command: |
+      #       # Find the latest iOS runtime
+      #       LATEST_IOS_RUNTIME=$(xcrun simctl list runtimes available | grep iOS | tail -1 | awk '{print $NF}' | tr -d '()')
+      #       echo "Selected iOS runtime: $LATEST_IOS_RUNTIME"
+
+      #       # Look for an existing iPhone 15 simulator with the selected runtime
+      #       EXISTING_DEVICE=$(xcrun simctl list devices available | grep "iPhone 15" | grep "$LATEST_IOS_RUNTIME" | awk -F '[()]' '{print $2}' | head -1)
+
+      #       if [ ! -z "$EXISTING_DEVICE" ]; then
+      #         echo "Using existing iPhone 15 simulator: $EXISTING_DEVICE"
+      #         echo "DEVICE_ID=$EXISTING_DEVICE" >> $BASH_ENV
+      #       else
+      #         echo "No existing iPhone 15 simulator found. Creating new one..."
+      #         DEVICE_ID=$(xcrun simctl create "GitHub-Action-iPhone" "iPhone 15" "$LATEST_IOS_RUNTIME" || { echo "Failed to create simulator"; exit 1; })
+      #         echo "Created simulator with ID: $DEVICE_ID"
+      #         echo "DEVICE_ID=$DEVICE_ID" >> $BASH_ENV
+      #       fi
+
+      # - run:
+      #     name: Boot iOS simulator
+      #     command: |
+      #       echo "Booting simulator: $DEVICE_ID"
+      #       # Force software rendering to avoid hardware acceleration issues
+      #       defaults write com.apple.CoreSimulator.$DEVICE_ID FramebufferEmulationMode -int 2 || echo "Failed to set software rendering, continuing with default"
+      #       xcrun simctl boot $DEVICE_ID || { echo "Failed to boot simulator"; exit 1; }
+
+      #       # Wait for simulator to boot with a macOS-compatible timeout
+      #       echo "Waiting for simulator to boot..."
+      #       xcrun simctl bootstatus $DEVICE_ID -b &
+      #       BOOT_PID=$!
+
+      #       # TODO: Wait up to 60 seconds for the bootstatus to complete
+      #       for i in {1..60}; do
+      #         if ps -p $BOOT_PID > /dev/null; then
+      #           sleep 1
+      #         else
+      #           break
+      #         fi
+      #       done
+
+      #       # Check if the bootstatus process is still running (indicating a timeout)
+      #       if ps -p $BOOT_PID > /dev/null; then
+      #         echo "Simulator boot timed out after 60 seconds"
+      #         kill -SIGTERM $BOOT_PID || true
+      #         exit 1
+      #       fi
+
+      #       # Check if bootstatus succeeded
+      #       wait $BOOT_PID || { echo "Simulator boot failed"; exit 1; }
+
+      #       # Additional wait for stability
+      #       sleep 5
+
+      # - run:
+      #     name: Analyze code
+      #     command: |
+      #       flutter analyze --fatal-infos --fatal-warnings
+
+      # - run:
+      #     name: Create environment variables file
+      #     command: |
+      #       echo "ENV_VAR1=$ENV_VAR1" > .env
+
+      - run:
+          name: Build iOS application (simulator build)
+          command: |
+            if [ -e "build/ios/iphonesimulator/Runner.app" ]; then
+              echo "File exists"
+            else
+              flutter build ios --simulator --no-codesign
+
+              # Subshell
+              (
+              cd build/ios/iphonesimulator
+              zip -r ../../../Runner.zip Runner.app
+              )
+            fi
+
+      - store_artifacts:
+          path: Runner.zip
+          destination: ios-build
+
+      # - run:
+      #     name: Build release application (.ipa)
+      #     command: |
+      #       # https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications
+
+      #       # Avoid leftover credentials on the runner
+      #       trap 'security delete-keychain $KEYCHAIN_PATH' EXIT
+
+      #       # Create variables
+      #       CERTIFICATE_PATH="$HOME/temp/${EXPORT_METHOD}.p12"
+      #       PP_PATH="$HOME/temp/${PP_NAME}.mobileprovision"
+      #       KEYCHAIN_PATH="$HOME/temp/app-signing.keychain-db"
+
+      #       # Import certificate and provisioning profile from secrets
+      #       echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+      #       echo -n "$BUILD_PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+
+      #       # Create temporary keychain
+      #       security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #       security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+      #       security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+      #       PROVISIONING_PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+      #       APP_BUILD_NAME="0.1.0"
+      #       APP_BUILD_NUMBER="1"
+
+      #       # Install certificate to keychain
+      #       security import $CERTIFICATE_PATH \
+      #         -P $P12_PASSWORD \
+      #         -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+      #       security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #       security list-keychain -d user -s $KEYCHAIN_PATH
+
+      #       # Confirm that .p12 file is installed
+      #       security find-certificate -c "${EXPORT_METHOD}" -a -Z || { echo "Certificate not found!"; exit 1; }
+
+      #       # For Xcode 16 and later
+      #       mkdir -p "$PROVISIONING_PROFILES_DIR" || { echo "Failed to create provisioning profiles directory!"; exit 1; }
+
+      #       # Install provisioning profile
+      #       cp $PP_PATH \
+      #         "$PROVISIONING_PROFILES_DIR" || { echo "Failed to copy provisioning profile!"; exit 1; }
+
+      #       # (Optional) Confirm it's installed (in MacOS machine) :
+      #       ls "$PROVISIONING_PROFILES_DIR"
+
+      #       flutter build ipa \
+      #         --release \
+      #         --export-options-plist=ios/export-configs/${EXPORT_METHOD}.plist \
+      #         #--dart-define-from-file=.env
+      #         --obfuscate \
+      #         --split-debug-info=ios/debug-info \
+      #         --build-name=$APP_BUILD_NAME \
+      #         --build-number=$APP_BUILD_NUMBER  || { echo "Flutter build failed!"; exit 1; }
+
+      #       # Archiving debug symbols
+      #       zip -r ios/debug-info/app.dSYM.zip ios/debug-info
+
+      # - run:
+      #     name: Archive ipa
+      #     command: |
+      #       cd build/ios/ipa
+      #       zip -r Runner.ipa.zip Runner.ipa
+
+      # - store_artifacts:
+      #     path: build/ios/ipa/Runner.ipa.zip
+      #     destination: ios-ipa-build
+
+      # - store_artifacts:
+      #     path: ios/debug-info/app.dSYM.zip
+      #     destination: ios-debug-symbols
+
+      # - run:
+      #     name: Validate ipa
+      #     command: |
+      #       xcrun transporter validate \
+      #       --assetFile $EXPORT_IPA_PATH \
+      #       --username $APPLE_ID_EMAIL \
+      #       --password $APPLE_ID_APP_SPECIFIC_PASSWORD
+
+      # - run:
+      #     name: Upload ipa to app store
+      #     command: |
+      #       xcrun transporter upload \
+      #       --assetFile $EXPORT_IPA_PATH \
+      #       --username $APPLE_ID_EMAIL \
+      #       --password $APPLE_ID_APP_SPECIFIC_PASSWORD \
+      #       --verbose
+
+      # - run:
+      #     name: Install iOS app on simulator
+      #     command: |
+      #       # Install onto the currently booted simulator
+      #       xcrun simctl install booted build/ios/iphonesimulator/Runner.app
+
+      #       # Install onto a specific simulator by it's UDID
+      #       # xcrun simctl install $DEVICE_ID build/ios/iphonesimulator/Runner.app
+
+      #       # Launch the app using the bundle ID
+      #       # xcrun simctl launch booted dev.soufianes.flutterci
+
+      #       # Or xcrun simctl launch $DEVICE_ID dev.soufianes.flutterci
+
+      #       # (Optional)
+      #       # xcrun simctl location booted set 37.7749 -122.4194
+
+      # - run:
+      #     name: Install Java (Zulu OpenJDK 17)
+      #     command: |
+      #       brew update
+      #       brew install --cask zulu@17
+      #       java -version
+
+      # - run:
+      #     name: Install Maestro CLI
+      #     command: |
+      #       curl -Ls "https://get.maestro.mobile.dev" | bash
+      #       echo 'export PATH="$HOME/.maestro/bin:$PATH"' >> $BASH_ENV
+      #       source $BASH_ENV
+      #       maestro --version
+
+      # - run:
+      #     name: Test app using Maestro (e2e)
+      #     command: |
+      #       mkdir maestro/screenshots
+      #       mkdir maestro/recordings
+      #       mkdir maestro/maestro_outputs
+      #       maestro record \
+      #         -e APP_ID=dev.soufianes.flutterci \
+      #         --local maestro/flows/main.yaml recordings/app_flow.mp4
+      #       mv login_screen1.png maestro/screenshots/
+      #       mv login_screen2.png maestro/screenshots/
+      #       mv welcome_screen.png maestro/screenshots/
+      #       mv maestro/screenshots/ maestro_outputs/
+      #       mv maestro/recordings/ maestro_outputs/
+      #       zip -r maestro/maestro_outputs.zip maestro/maestro_outputs/
+      #       ls -la
+
+      # - run:
+      #     name: Shutdown simulator
+      #     command: |
+      #       if [ ! -z "$DEVICE_ID" ]; then
+      #         echo "Shutting down simulator..."
+      #         xcrun simctl shutdown $DEVICE_ID || echo "Simulator already shut down or shutdown failed!"
+      #         xcrun simctl delete $DEVICE_ID || echo "Simulator deletion failed!"
+      #       else
+      #         echo "No DEVICE_ID set, skipping shutdown and delete!"
+      #       fi
+
+      # - store_artifacts:
+      #     path: maestro/maestro_outputs.zip
+      #     destination: ios-maestro-outputs
+
+      # - store_artifacts:
+      #     path: ios.zip
+      #     destination: compressed-ios-dir
+      #     # This workflow runs on demand via CircleCI API
+
+workflows:
+  # ios-setup-manual:
+  #   jobs:
+  #     - flutter-ios-setup:
+  #         context: env-vars
+  #         filters:
+  #           branches:
+  #             only:
+  #               - main
+  #               - develop
+  # ios-build-full:
+  #   jobs:
+  #     - flutter-ios-setup:
+  #         name: setup-dependencies
+  #         context: env-vars
+  #         filters:
+  #           branches:
+  #             only:
+  #               - main
+  #               - develop
+  #     - flutter-ios-build:
+  #         requires:
+  #           - setup-dependencies
+  #         context: env-vars
+  #         filters:
+  #           branches:
+  #             only:
+  #               - main
+  #               - develop
+  ios-build-only:
+    jobs:
+      - flutter-ios-build:
+          # TODO: create a base64 data using `base64 -i development.p12` and save it to github secrets
+          #BUILD_CERTIFICATE_BASE64: ""
+          ## TODO: KEYCHAIN_PASSWORD can be any new random password
+          #KEYCHAIN_PASSWORD: ""
+          ## TODO: create a base64 data using `base64 -i PROVISIONING_PROFILE.mobileprovision` and save it to github secrets
+          #BUILD_PROVISIONING_PROFILE_BASE64: ""
+          #P12_PASSWORD: ""
+          #PP_NAME: flutterapp1_dev
+          #EXPORT_METHOD: development # | distribution
+          #EXPORT_IPA_PATH: "build/ios/ipa/Runner.ipa" # Final IPA artifact path
+          #APPLE_ID_EMAIL:""
+          #APPLE_ID_APP_SPECIFIC_PASSWORD:""
+          context: env-vars
+          filters:
+            branches:
+              only:
+                - main
+                - develop
