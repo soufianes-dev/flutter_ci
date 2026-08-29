@@ -20,7 +20,7 @@
         <key>provisioningProfiles</key>
         <dict>
             <key>dev.soufianes.flutterci</key><!-- TODO: Your bundle name-->
-            <string>flutterapp1_appstore</string><!-- TODO: Your app-store .mobileprovision file
+            <string>flutterci_appstore</string><!-- TODO: Your app-store .mobileprovision file
             name
             without the file extension-->
         </dict>

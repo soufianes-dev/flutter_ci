@@ -11,7 +11,7 @@
     <key>provisioningProfiles</key>
     <dict>
       <key>dev.soufianes.flutterci</key>
-      <string>flutterapp1_dev</string>
+      <string>flutterci_dev</string>
     </dict>
   </dict>
 </plist>
