@@ -282,69 +282,27 @@ jobs:
 
           ~/.maestro/bin/maestro record \
             -e APP_ID=dev.soufianes.flutterci \
-            --local maestro/flows/main.yaml recordings/app_flow.mp4
+            --local maestro/flows/main.yaml maestro/recordings/app_flow.mp4
 
-          #Collect screenshots wherever Maestro dropped them
-          find . -maxdepth 3 -name '*.png' -exec mv {} maestro/maestro_outputs/ \;
-          zip -r maestro/maestro_outputs.zip maestro/maestro_outputs/
-          ls -la
+          # Collect screenshots wherever Maestro dropped them
+          find . -path ./maestro -prune -o -maxdepth 3 -name '*.png' -print -exec mv {} maestro/maestro_outputs/ \;
+          
+          if [ -n "$(ls -A maestro/maestro_outputs 2>/dev/null)" ]; then
+            zip -r maestro/maestro_outputs.zip maestro/maestro_outputs/
+          else
+            echo "No screenshots found, skipping zip"
+          fi
+          ls -la maestro/recordings maestro/maestro_outputs
 
       - name: Upload Maestro outputs
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: ios-maestro-outputs
-          path: maestro/maestro_outputs.zip
-
-      # - name: Capture screenshots
-      #   run: |
-      #     echo "Starting screenshot capture..."
-      #     mkdir -p recordings/screenshots
-
-      #     # Check disk space
-      #     echo "Checking disk space..."
-      #     df -h .
-
-      #     # Verify simulator is ready
-      #     echo "Checking simulator status..."
-      #     xcrun simctl list devices | grep "${{ env.DEVICE_ID }}" || { echo "Simulator not found or not ready!"; exit 1; }
-      #     xcrun simctl bootstatus ${{ env.DEVICE_ID }} || { echo "Simulator not in a valid state!"; exit 1; }
-
-      #     # Capture screenshots every 1s for 30 seconds (30 screenshots)
-      #     echo "Capture screenshots every 1s for 30 seconds..."
-      #     COUNT=1
-      #     MAX_COUNT=30
-      #     while [ $COUNT -le $MAX_COUNT ]; do
-      #       xcrun simctl io ${{ env.DEVICE_ID }} screenshot recordings/screenshots/screenshot_$COUNT.png || { echo "Failed to capture screenshot $COUNT !"; exit 1; }
-      #       echo "Captured screenshot $COUNT"
-      #       COUNT=$((COUNT + 1))
-      #       # Sleep for 1 second
-      #       sleep 1
-      #     done
-
-      #     # Verify screenshots were captured
-      #     SCREENSHOT_COUNT=$(ls -1 recordings/screenshots/ | wc -l)
-      #     if [ "$SCREENSHOT_COUNT" -gt 0 ]; then
-      #       echo "Captured $SCREENSHOT_COUNT screenshots successfully"
-      #       ls -la recordings/screenshots/
-      #       # Check if at least one screenshot is non-empty
-      #       FIRST_SCREENSHOT_SIZE=$(stat -f %z recordings/screenshots/screenshot_1.png)
-      #       if [ "$FIRST_SCREENSHOT_SIZE" -gt 0 ]; then
-      #         echo "First screenshot size: $FIRST_SCREENSHOT_SIZE bytes"
-      #       else
-      #         echo "Error: Screenshots are empty!"
-      #         xcrun simctl diagnose > simulator_diagnostic.txt
-      #         echo "Simulator diagnostic saved to simulator_diagnostic.txt"
-      #         exit 1
-      #       fi
-      #     else
-      #       echo "Error: No screenshots captured!"
-      #       xcrun simctl diagnose > simulator_diagnostic.txt
-      #       echo "Simulator diagnostic saved to simulator_diagnostic.txt"
-      #       exit 1
-      #     fi
-      #   env:
-      #     DEVICE_ID: ${{ env.DEVICE_ID }}
+          path: |
+            maestro/maestro_outputs.zip
+            maestro/recordings/app_flow.mp4
+          if-no-files-found: warn
 
       - name: Shutdown simulator
         if: always() # Run even if previous steps fail
@@ -356,53 +314,3 @@ jobs:
           else
             echo "No DEVICE_ID set, skipping shutdown and delete!"
           fi
-
-      # - name: Prepare and upload artifacts
-      #   if: always() # Run even if previous steps fail
-      #   run: |
-      #     echo "Preparing artifacts for upload..."
-      #     mkdir -p artifacts
-
-      #     # Copy screenshots if they exist
-      #     if [ -d "recordings/screenshots" ]; then
-      #       cp -r recordings/screenshots artifacts/screenshots
-      #       echo "Screenshots copied to artifacts/"
-      #     else
-      #       echo "No screenshots found to copy!"
-      #     fi
-
-      #     # Copy diagnostic file if it exists
-      #     if [ -f "simulator_diagnostic.txt" ]; then
-      #       cp -r simulator_diagnostic.txt artifacts/simulator_diagnostic.txt
-      #       echo "Diagnostic file copied to artifacts/"
-      #     else
-      #       echo "No diagnostic file found to copy!"
-      #     fi
-
-      #     # List artifacts directory contents
-      #     echo "Artifacts directory contents:"
-      #     ls -la artifacts/
-
-      #     # Compress artifacts into a zip file for faster upload
-      #     if [ -n "$(ls artifacts/)" ]; then
-      #       zip -r artifacts.zip artifacts/
-      #       echo "Artifacts compressed into artifacts.zip"
-      #     else
-      #       echo "No artifacts to compress!"
-      #     fi
-      #   continue-on-error: true # Continue even if artifact preparation fails
-
-      # - name: Upload artifacts
-      #   if: always() # Run even if previous steps fail
-      #   uses: actions/upload-artifact@v7
-      #   with:
-      #     name: ios-simulator-artifacts
-      #     path: artifacts.zip
-      #     retention-days: 30
-      #     if-no-files-found: warn # Warn if no zip file is found
-
-      # More: https://chatgpt.com/share/67603bca-97a0-800f-bf71-14f90fd55afb
-      # - name: Run Flutter Integration Tests
-      #   run: |
-      #     # Run the integration tests
-      #     # flutter test integration_test/app_test.dart -d ${{ env.SIMULATOR_UDID }}

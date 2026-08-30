@@ -4,100 +4,169 @@
 # Run using: "ruby ios/setup.rb"
 # Validate using: "ruby -c ios/setup.rb"
 
-# NOTE: This script is idempotent (That means it can be run multiple times) (Safe for multiple runs)
+# NOTE: This script is idempotent.
+# It can be run multiple times.
 
 require "xcodeproj"
 require "plist"
 
 puts "🚀 Starting iOS project setup..."
 
-REQUIRED_FILES = ["GoogleService-Info.plist", "PrivacyInfo.xcprivacy"]
-PROJECT_PATH = "ios/Runner.xcodeproj"
-ENTITLEMENTS_FILE = "Runner.entitlements"
-ENTITLEMENTS_PATH = "ios/Runner/#{ENTITLEMENTS_FILE}"
+# Paths
 
-# Loads the project.pbxproj file
+PROJECT_PATH = "ios/Runner.xcodeproj"
+
+RUNNER_DIRECTORY="ios/Runner"
+
+ENTITLEMENTS_FILE = "Runner.entitlements"
+ENTITLEMENTS_PATH = File.join(RUNNER_DIRECTORY, ENTITLEMENTS_FILE)
+
+REQUIRED_FILES = ["GoogleService-Info.plist", "PrivacyInfo.xcprivacy"]
+
+# Loads Xcode project
+
 project = Xcodeproj::Project.open(PROJECT_PATH)
+
 # NOTE: For standard Flutter projects, we target only the "Runner" app target
 target = project.targets.find { |t| t.name == "Runner" }
+
+# Standard Flutter Runner group
 group = project.main_group.find_subpath("Runner", true)
 
 # Validate project structure
+
 unless target
-  puts "❌ Could not find 'Runner' target in project"
+  puts "❌ Could not find 'Runner' target in #{PROJECT_PATH}"
   exit 1
 end
 
 unless group
-  puts "❌ Could not find 'Runner' group in project"
+  puts "❌ Could not find 'Runner' group in #{PROJECT_PATH}"
   exit 1
 end
 
+
+puts "✅ Found Runner target"
+puts "✅ Found Runner group"
+
+# Helpers
+
+# Validate plist files
+def validate_plist(file_path)
+  Plist.parse_xml(file_path)
+  true
+rescue StandardError
+  false
+end
+
+# Find an existing file reference by filename.
+def find_file_reference(group, filename)
+  group.files.find do |file|
+    file.path.to_s == filename
+  end
+end
+
+# Check whether a file reference is already present in the resource phase.
+def resource_in_build_phase?(target, file_ref)
+  target.resources_build_phase.files.any? do |build_file|
+    build_file.file_ref == file_ref
+  end
+end
+
+
 # Inject resources: "GoogleService-Info.plist", "PrivacyInfo.xcprivacy"
 REQUIRED_FILES.each do |filename|
-  file_path = "ios/Runner/#{filename}"
+  filesystem_path = File.join(RUNNER_DIRECTORY, filename)
 
   # Validate that "GoogleService-Info.plist" & "PrivacyInfo.xcprivacy" files exist
   # Validate required files before injection
-  unless File.exist?(file_path)
-    puts "❌ Missing required file: #{filename}, Please ensure it is placed in ios/Runner/."
+  unless File.exist?(filesystem_path)
+    puts "❌ Missing required file:"
+    puts "   #{filesystem_path}"
+    puts "   Please ensure it exists in ios/Runner/"
     exit 1
   end
 
-  # Validate plist files
-  def validate_plist(file_path)
-    Plist.parse_xml(file_path)
-    true
-  rescue
-    false
-  end
-
-  unless validate_plist(file_path)
-    puts "❌ Invalid plist format: #{file_path}"
+  unless validate_plist(filesystem_path)
+    puts "❌ Invalid plist format:"
+    puts "   #{filesystem_path}"
     exit 1
   end
 
-  # Check if file already exists in project (idempotent)
-  existing_ref = group.files.find do |file|
-    file.path == filename || file.path.to_s.end_with?(filename)
-  end
+  # Find existing Xcode file reference
 
-  if existing_ref
-    puts "✅ #{filename} already exists in project"
+  file_ref = find_file_reference(group, filename)
+
+  if file_ref
+    puts "✅ #{filename} file reference already exists"
   else
     # Adds file references (replaces drag-and-drop)
-    file_ref = group.new_file(file_path)
+    # IMPORTANT
+    # This path is relative to the Runner group
+    file_ref = group.new_file(filename)
+    puts "✅ Added #{filename} file reference"
+  end
+
+
+  # Add to copy bundle resources if necessary
+  unless resource_in_build_phase?(target, file_ref)
     target.resources_build_phase.add_file_reference(file_ref)
-    puts "✅ Added #{filename} to project"
+
+    puts "✅ Added #{filename} to copy bundle resources"
+  else
+    puts "✅ #{filename} already exists in copy bundle resources"
   end
 end
 
-aps_environment = ENV["APS_ENVIRONMENT"] || "development"
+# Entitlements
+
+aps_environment = ENV.fetch("APS_ENVIRONMENT", "development")
+
 unless File.exist?(ENTITLEMENTS_PATH)
-  File.write(ENTITLEMENTS_PATH, <<~ENTITLEMENTS)
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-    <dict>
-      <!-- Only security-sensitive capabilities like: -->
-      <!-- aps-environment (Push Notifications) -->
-      <!-- com.apple.security.application-groups (App Groups) -->
-      <!-- com.apple.developer.healthkit (HealthKit) -->
-      <!-- com.apple.developer.networking.vpn.api (VPN) -->
-      <!-- com.apple.developer.in-app-payments (Apple Pay) -->
-    
-      <!-- Entitlements are embedded in the code signature and validated by Apple and the OS for security-->
-    
-      <key>aps-environment</key>
-      <string>#{aps_environment}</string>
-    
-      <!-- Other Entitlements if applicable... -->
-    </dict>
-    </plist>
-  ENTITLEMENTS
-  group.new_file(ENTITLEMENTS_PATH)
+  File.write(
+    ENTITLEMENTS_PATH, 
+    <<~ENTITLEMENTS
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <!-- 
+          Only security-sensitive capabilities can be declared here:
+        
+          Examples:
+            aps-environment (Push Notifications)
+            com.apple.security.application-groups (App Groups)
+            com.apple.developer.networking.vpn.api (VPN)
+            com.apple.developer.in-app-payments (Apple Pay)
+        -->
+      
+        <!-- Entitlements are embedded in the code signature and validated by Apple and the OS for security-->
+      
+        <key>aps-environment</key>
+        <string>#{aps_environment}</string>
+      
+        <!-- Other Entitlements if applicable... -->
+      </dict>
+      </plist>
+    ENTITLEMENTS
+  )
   puts "✅ Created #{ENTITLEMENTS_PATH}"
+else
+  puts "✅ #{ENTITLEMENTS_PATH} already exists"
 end
+
+# Add entitlements file to Xcode project
+entitlements_ref = find_file_reference(group, ENTITLEMENTS_FILE)
+unless entitlements_ref
+  # IMPORTANT:
+  # Relative to the Runner group
+  entitlements_ref = group.new_file(ENTITLEMENTS_FILE)
+
+  puts "✅ Added #{ENTITLEMENTS_FILE} file reference"
+else
+  puts "✅ #{ENTITLEMENTS_FILE} file reference already exists"
+end
+
 
 # Configure entitlements (only if not set)
 # NOTE: This does't toggle the capability UI in Xcode, but sets the entitlement path
@@ -109,9 +178,9 @@ target.build_configurations.each do |config|
     puts "✅ Set CODE_SIGN_STYLE to Manual"
   end
 
-  if config.build_settings["CODE_SIGN_ENTITLEMENTS"].nil?
-    config.build_settings["CODE_SIGN_ENTITLEMENTS"] = "Runner/#{ENTITLEMENTS_FILE}"
-    puts "✅ Set CODE_SIGN_ENTITLEMENTS"
+  expected = "Runner/Runner.entitlements"
+  if config.build_settings["CODE_SIGN_ENTITLEMENTS"] != expected
+    config.build_settings["CODE_SIGN_ENTITLEMENTS"] = expected
   end
 end
 
@@ -124,34 +193,34 @@ target_attrs["SystemCapabilities"] ||= {}
 # Add system capability (Push notification)
 CAPABILITIES = [
   "com.apple.Push", # Push notifications
-  "com.apple.BackgroundModes", # Background fetch, remote notifications
+  "com.apple.BackgroundModes" # Background fetch, remote notifications
   # "com.apple.SignInWithApple", # Sign in with Apple
   # "com.apple.Location", # Location Services
-  # "com.apple.HealthKit", # Access HealthKit data
-  # "com.apple.HomeKit", # Home automation
   # "com.apple.NearFieldCommunication", # NFC tag reading
   # "com.apple.Wallet", # Apple Wallet / PassKit
-  # "com.apple.GameCenter", # Game Center integration
   # "com.apple.Siri", # SiriKit usage
-  # "com.apple.Music", # Apple Music usage
   # "com.apple.Handoff", # Continuity and Handoff
   # "com.apple.CloudKit", # iCloud and CloudKit
-  # "com.apple.CarPlay", # CarPlay Support
   # "com.apple.VPN",  # VPN configuration
   # "com.apple.CoreML" # Machine learning models
 ]
+
 CAPABILITIES.each do |capability|
   if target_attrs["SystemCapabilities"][capability].nil?
     # Enables capability (replaces manual setting in Signing & Capabilities tab)
     target_attrs["SystemCapabilities"][capability] = {"enabled" => 1}
     puts "✅ Enabled \"#{capability}\" capability"
+  else
+    puts "✅ \"#{capability}\" capability already configured"
   end
 end
 
+project.save
+
+# Summary
+
 # Writes those changes back to disk "project.pbxproj"
 enabled_caps = CAPABILITIES.select { |capability| target_attrs["SystemCapabilities"][capability]&.[]("enabled") == 1 }
-
-project.save
 
 puts "\n Setup Summary:"
 puts "\t• Files added/verified: #{REQUIRED_FILES.join(", ")}"

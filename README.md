@@ -1,28 +1,8 @@
 # flutterci
 
-A new Flutter project.
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
-
 ## Fastlane setup
 
 ```bash
-
-# Build Android appbundle
-flutter build appbundle --obfuscate --split-debug-info=android/debug-info --dart-define-from-file=.env --build-name=0.1.0 --build-number=1
-# Build iOS ipa
-flutter build ipa --release --obfuscate --split-debug-info=ios/debug-info --dart-define-from-file=.env --build-name=0.1.0 --build-number=1
 
 # Upload native-debug-symbols.zip to play store after creating a release
 cd build/app/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib/ &&
@@ -45,10 +25,7 @@ flutterfire configure
 flutter pub add firebase_core
 keytool -genkey -v -keystore ~upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
 
-# flutter build appbundle --obfuscate --split-debug-info=android/debug-info --dart-define-from-file=.env --build-name=0.1.0 --build-number=1
-flutter build appbundle --obfuscate --split-debug-info=android/debug-info
 
-export FLUTTER_ROOT="/home/soufiane/flutter/"
 # https://console.cloud.google.com/apis/library/androidpublisher.googleapis.com?hl=en&inv=1&invt=Abrhmw&project=flutter-app1-d3af8
 fastlane run validate_play_store_json_key json_key:/home/soufiane/dev/projects/playground/dev_ops/flutter_ci/flutter-ci-432e4-b2e456c83eaa.json
 (cd android && fastlane init)
@@ -59,34 +36,20 @@ cd ios && bundle exec fastlane add_plugin firebase_app_distribution
 
 bundle update
 
+
 # In CI
-
 firebase logout
-firebase login:ci
-
+firebase login:ci # and make use of FIREBASE_CLI_TOKEN
 fastlane # Or `/usr/local/bin/fastlane`
 
-
+# Android
 # cd android && bundle exec fastlane <name of the lane>
-cd android && fastlane distribute
-cd android && fastlane internal
-cd android && fastlane alpha
-cd android && fastlane beta
-cd android && fastlane promote_to_production
-cd android && fastlane production
+cd android && fastlane distribute # distribute | internal | alpha | beta | promote_to_production | production |
 # cd android && bundle exec fastlane run firebase_app_distribution
 cd android && bundle exec fastlane run deploy
 
-
-# cd ios && fastlane <name of the lane>
-
-
-
-
-
-
-
-
+# iOS
+cd ios && fastlane <name of the lane>
 ```
 
 ## CI/CD

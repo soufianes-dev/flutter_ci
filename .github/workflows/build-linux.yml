@@ -260,11 +260,11 @@ jobs:
             flutter_arch: x64
             rpm_arch: x86_64
 
-          # - arch: aarch64
+          - arch: aarch64
           # TODO: ubuntu-24.04-arm is free for public repositories (and not private repos)
-          #   runner: ubuntu-24.04-arm
-          #   flutter_arch: arm64
-          #   rpm_arch: aarch64
+            runner: ubuntu-24.04-arm
+            flutter_arch: arm64
+            rpm_arch: aarch64
 
     steps:
       - name: Install dependencies
