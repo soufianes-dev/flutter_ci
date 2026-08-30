@@ -132,16 +132,7 @@ class _LoginState extends State<Login> {
                               //GoRouter.of(context).pushReplacement('/wrapper');
                               //context.go('/dashboard');
                               if (_formKey.currentState!.validate()) {
-                                //TODO
-
-                                var res = await loadingDialog(
-                                  context,
-                                  'Signing in to the app...',
-                                  () => _loginLogic(),
-                                );
-
-                                log('res = $res');
-
+                                context.pushReplacement('/welcome');
                                 log(_emailController.text.trim());
                               }
                             },
@@ -193,83 +184,4 @@ class _LoginState extends State<Login> {
     _passwordController.dispose();
     super.dispose();
   }
-
-  Future<void> _loginLogic() async {
-    try {
-      TextInput.finishAutofillContext();
-      // Here we emulate signing ip logic
-      // TODO: await Future.delayed(const .new(milliseconds: 500));
-      if (mounted) context.pushReplacement('/welcome');
-
-      // Just for testing
-      //throw Exception('Error when logging to the app');
-    } catch (e) {
-      log('e = $e');
-
-      rethrow;
-    }
-  }
-}
-
-//
-//
-//
-//
-//
-
-Future<bool?> loadingDialog(
-  BuildContext context,
-  String message,
-  Future<void> Function() callback,
-) async {
-  Future.microtask(() async {
-    try {
-      await callback();
-    } catch (e) {
-      if (context.mounted) {
-        context.pop(false);
-
-        // To display error message in a snackbar
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString()),
-            behavior: SnackBarBehavior.floating,
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(8.0)),
-            ),
-          ),
-        );
-      }
-    }
-  });
-
-  var result = await showDialog<bool>(
-    context: context,
-    barrierDismissible: false,
-    builder: (context) {
-      return AlertDialog(
-        title: Text(message),
-        content: Column(
-          children: [
-            Text("Please wait a moment..."),
-            const SizedBox(height: 16.0),
-            const CircularProgressIndicator(),
-          ],
-        ),
-        alignment: Alignment.center,
-        actionsAlignment: MainAxisAlignment.center,
-        contentPadding: const EdgeInsets.all(16.0),
-        scrollable: true,
-        elevation: 2.0,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(16.0)),
-        ),
-      );
-    },
-  );
-
-  //
-
-  log('result = $result');
-  return result;
 }
