@@ -5,7 +5,6 @@ class const Welcome({super.key}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(centerTitle: true, title: Text("Hello, World!")),
       body: Column(
         mainAxisSize: .min,
         children: [
