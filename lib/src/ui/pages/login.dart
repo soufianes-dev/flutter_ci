@@ -136,34 +136,7 @@ class _LoginState extends State<Login> {
                                 log(_emailController.text.trim());
                               }
                             },
-                            child: const Text("LOGIN"),
-                          ),
-                          const SizedBox(height: 8.0),
-                          const Text(
-                            '- - - Or - - -',
-                            style: .new(color: Colors.grey),
-                          ),
-                          const SizedBox(height: 16.0),
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              context.go('/signup');
-                            },
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size.fromHeight(50.0),
-                              shape: const ContinuousRectangleBorder(),
-                            ),
-                            icon: const Icon(Icons.abc),
-                            label: const Text("REGISTER USING EMAIL"),
-                          ),
-                          const SizedBox(height: 16.0),
-                          OutlinedButton.icon(
-                            onPressed: () {},
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const .fromHeight(50.0),
-                              shape: const ContinuousRectangleBorder(),
-                            ),
-                            icon: const Icon(Icons.abc),
-                            label: const Text("LOGIN WITH GOOGLE"),
+                            child: const Text("submit"),
                           ),
                         ],
                       ),

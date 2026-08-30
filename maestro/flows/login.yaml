@@ -18,7 +18,7 @@ appId: "${APP_ID}"
 - assertVisible: "login"
 - takeScreenshot: "login_screen2"
 - tapOn: 
-    text: "LOGIN"
+    text: "submit"
 - runFlow: 
     label: "Welcome Screen"
     file: welcome.yaml
