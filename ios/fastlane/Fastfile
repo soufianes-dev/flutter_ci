@@ -243,7 +243,7 @@ platform :ios do
     build_release
     # Upload to the App Store Connect
     upload_to_app_store(
-      skip_metadata: true,
+      skip_metadata: true, # TODO: 
       skip_screenshots: true,
       apple_id: ENV["APPLE_ID"], # e.g., "your_apple_id@email.com"
       team_id: ENV["TEAM_ID"] # "YOUR_TEAM_ID"

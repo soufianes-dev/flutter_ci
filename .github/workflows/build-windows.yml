@@ -37,7 +37,6 @@ jobs:
             inno_archs_allowed: x64compatible
             inno_archs_install: x64compatible
 
-          # TODO windows-11-arm is free for public repositories (and not private repos)
           - arch: arm64
             runs-on: windows-11-arm # native Arm runner
             flutter_arch: arm64

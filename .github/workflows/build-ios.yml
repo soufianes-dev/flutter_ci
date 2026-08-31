@@ -91,11 +91,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pub-
 
-      # - name: Install CocoaPods dependencies
-      #   run: |
-      #     flutter pub get
-      #     (cd ios && pod install --repo-update)
-
       - name: Create .env from GitHub secrets
         run: |
           cat > .env <<'EOF'

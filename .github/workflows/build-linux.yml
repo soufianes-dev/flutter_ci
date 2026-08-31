@@ -17,7 +17,7 @@ env:
   APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutterci"
   DEBIAN_PACKAGE_NAME: "flutter-app1"
-  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_VERSION: "3.47.0"
   FLUTTER_CHANNEL: "stable"
 
 jobs:
@@ -37,7 +37,6 @@ jobs:
             appimagetool: appimagetool-x86_64.AppImage
 
           - arch: aarch64
-          # TODO: ubuntu-24.04-arm is free for public repositories (and not private repos)
             runner: ubuntu-24.04-arm # native ARM runner
             flutter_arch: arm64
             deb_arch: arm64
@@ -261,7 +260,6 @@ jobs:
             rpm_arch: x86_64
 
           - arch: aarch64
-          # TODO: ubuntu-24.04-arm is free for public repositories (and not private repos)
             runner: ubuntu-24.04-arm
             flutter_arch: arm64
             rpm_arch: aarch64

@@ -170,19 +170,19 @@ end
 
 # Configure entitlements (only if not set)
 # NOTE: This does't toggle the capability UI in Xcode, but sets the entitlement path
-target.build_configurations.each do |config|
-  # Only set to Manual if not already configured
-  # Only sets it if it's nil or not present
-  unless config.build_settings["CODE_SIGN_STYLE"]
-    config.build_settings["CODE_SIGN_STYLE"] = "Manual" # Manual | Automatic
-    puts "✅ Set CODE_SIGN_STYLE to Manual"
-  end
+# target.build_configurations.each do |config|
+#   # Only set to Manual if not already configured
+#   # Only sets it if it's nil or not present
+#   unless config.build_settings["CODE_SIGN_STYLE"]
+#     config.build_settings["CODE_SIGN_STYLE"] = "Manual" # Manual | Automatic
+#     puts "✅ Set CODE_SIGN_STYLE to Manual"
+#   end
 
-  expected = "Runner/Runner.entitlements"
-  if config.build_settings["CODE_SIGN_ENTITLEMENTS"] != expected
-    config.build_settings["CODE_SIGN_ENTITLEMENTS"] = expected
-  end
-end
+#   expected = "Runner/Runner.entitlements"
+#   if config.build_settings["CODE_SIGN_ENTITLEMENTS"] != expected
+#     config.build_settings["CODE_SIGN_ENTITLEMENTS"] = expected
+#   end
+# end
 
 # Capabilities
 attributes = project.root_object.attributes["TargetAttributes"] ||= {}
