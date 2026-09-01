@@ -17,7 +17,7 @@ env:
   APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutterci"
   DEBIAN_PACKAGE_NAME: "flutter-app1"
-  FLUTTER_VERSION: "3.47.0"
+  FLUTTER_VERSION: "3.47.2"
   FLUTTER_CHANNEL: "stable"
 
 jobs:
@@ -36,11 +36,12 @@ jobs:
             deb_arch: amd64
             appimagetool: appimagetool-x86_64.AppImage
 
-          - arch: aarch64
-            runner: ubuntu-24.04-arm # native ARM runner
-            flutter_arch: arm64
-            deb_arch: arm64
-            appimagetool: appimagetool-aarch64.AppImage
+          # TODO: Uncomment when Flutter support arm64 on Linux
+          # - arch: aarch64
+          #   runner: ubuntu-24.04-arm # native ARM runner
+          #   flutter_arch: arm64
+          #   deb_arch: arm64
+          #   appimagetool: appimagetool-aarch64.AppImage
 
     steps:
       - name: Checkout code

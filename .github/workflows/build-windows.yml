@@ -37,12 +37,13 @@ jobs:
             inno_archs_allowed: x64compatible
             inno_archs_install: x64compatible
 
-          - arch: arm64
-            runs-on: windows-11-arm # native Arm runner
-            flutter_arch: arm64
-            msix_arch: arm64
-            inno_archs_allowed: arm64
-            inno_archs_install: arm64
+          # TODO: Uncomment when Flutter support arm64 on Windows
+          # - arch: arm64
+          #   runs-on: windows-11-arm # native Arm runner
+          #   flutter_arch: arm64
+          #   msix_arch: arm64
+          #   inno_archs_allowed: arm64
+          #   inno_archs_install: arm64
 
     steps:
       - name: Checkout code
