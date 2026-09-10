@@ -95,7 +95,7 @@ jobs:
             --release \
             --dart-define-from-file=.env \
             --obfuscate \
-            --split-debug-info=build/macos/symbols \
+            --split-debug-info=symbols/macos \
             --build-name=${{ env.APP_VERSION }} \
             --build-number=${{ env.BUILD_NUMBER }} \
             --target lib/main.dart
@@ -104,7 +104,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: macos-debug-symbols-${{ env.APP_VERSION }}
-          path: build/macos/symbols
+          path: symbols/macos
           if-no-files-found: ignore # To silently skip
           retention-days: 14
 
@@ -117,7 +117,7 @@ jobs:
 
           # Create DMG
           DMG_ROOT="build/macos/dmg"
-          DMG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}.dmg"
+          DMG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-macos-unsigned.dmg"
           rm -rf "$DMG_ROOT" "$DMG_NAME"
           mkdir -p "$DMG_ROOT"
           # Copy application
@@ -134,7 +134,7 @@ jobs:
 
           # Create PKG
           PKG_ROOT="build/macos/pkg"
-          PKG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-installer.pkg"
+          PKG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-macos-unsigned-installer.pkg"
           rm -rf "$PKG_ROOT" "$PKG_NAME"
           mkdir -p "$PKG_ROOT"
           cp -R "$APP_PATH" "$PKG_ROOT/"

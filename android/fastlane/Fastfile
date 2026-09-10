@@ -66,7 +66,7 @@ platform :android do
     sh "flutter pub get"
 
     # Verify dependency integrity
-    sh "dart analyze --fatal-infos ."
+    sh "flutter analyze --fatal-infos"
 
     UI.message("Dependency status checked")
   end
@@ -105,6 +105,7 @@ platform :android do
 
   private_lane :build_aab do
     sh "flutter build appbundle" \
+    "--release " \
     "--obfuscate " \
     "--split-debug-info=android/debug-info" \
     "--dart-define-from-file=.env" \

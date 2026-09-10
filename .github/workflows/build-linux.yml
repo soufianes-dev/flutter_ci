@@ -124,7 +124,7 @@ jobs:
             --release \
             --dart-define-from-file=.env \
             --obfuscate \
-            --split-debug-info=build/linux/symbols \
+            --split-debug-info=symbols/linux \
             --build-name=${{ env.APP_VERSION }} \
             --build-number=${{ env.BUILD_NUMBER }} \
             --target lib/main.dart
@@ -133,7 +133,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: linux-debug-symbols-${{ matrix.arch }}-${{ env.APP_VERSION }}
-          path: build/linux/symbols
+          path: symbols/linux
           if-no-files-found: ignore # To silently skip
           retention-days: 14
 
@@ -185,7 +185,7 @@ jobs:
           # ARCH is used by appimagetool to select the correct runtime
           export ARCH=${{ matrix.arch }}
           # Build AppImage
-          APPIMAGE_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}.AppImage"
+          APPIMAGE_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-linux-${{ matrix.arch }}.AppImage"
           appimagetool --no-appstream AppDir "$APPIMAGE_NAME"
           echo "APPIMAGE_NAME=$APPIMAGE_NAME" >> "$GITHUB_ENV"
 
@@ -196,7 +196,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends dpkg-dev
 
           BUNDLE_DIR="build/linux/${{ matrix.flutter_arch }}/release/bundle"
-          PKG_DIR="${{ env.DEBIAN_PACKAGE_NAME }}-v${{ env.APP_VERSION }}-${{ matrix.arch }}"
+          PKG_DIR="${{ env.DEBIAN_PACKAGE_NAME }}-v${{ env.APP_VERSION }}-linux-${{ matrix.arch }}"
 
           # Create package structure
           mkdir -p "$PKG_DIR/DEBIAN"
@@ -343,7 +343,7 @@ jobs:
             --release \
             --dart-define-from-file=.env \
             --obfuscate \
-            --split-debug-info=build/linux/symbols \
+            --split-debug-info=symbols/linux \
             --build-name=${{ env.APP_VERSION }} \
             --build-number=${{ env.BUILD_NUMBER }} \
             --target lib/main.dart
