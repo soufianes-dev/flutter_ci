@@ -122,6 +122,7 @@ jobs:
             exit 1
           }
 
+          # Get Windows Publisher ID from → https://partner.microsoft.com/en-us/dashboard/account/v3/organization/identity
           dart run msix:create `
           --architecture "${{ matrix.msix_arch }}" `
           --display-name "${{ env.APP_TITLE }}" `
@@ -249,7 +250,7 @@ jobs:
           VersionInfoCompany={#MyAppPublisher}
           VersionInfoDescription={#MyAppName} Installer
           VersionInfoCopyright=(C) ${{ env.YEAR }} {#MyAppPublisher}
-          DefaultDirName={autopf}\\${{ env.APP_NAME }}
+          DefaultDirName={autopf}\${{ env.APP_NAME }}
           DefaultGroupName={#MyAppName}
           ; Cleaner UX
           DisableProgramGroupPage=yes
@@ -261,7 +262,7 @@ jobs:
           PrivilegesRequired=admin
           ArchitecturesAllowed=${{ matrix.inno_archs_allowed }}
           ArchitecturesInstallIn64BitMode=${{ matrix.inno_archs_install }}
-          UninstallDisplayIcon={app}\\{#MyAppExeName}
+          UninstallDisplayIcon={app}\{#MyAppExeName}
           ; Closes running app before upgrade
           CloseApplications=yes
           RestartApplications=no
@@ -275,15 +276,15 @@ jobs:
           Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
 
           [Files]
-          Source: "build\\windows\\${{ matrix.arch }}\\runner\\Release\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "build\windows\${{ matrix.arch }}\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
           [Icons]
-          Name: "{group}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"
-          Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon
+          Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+          Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
           [Run]
           ; Launch the main application executable after setup finishes
-          Filename: "{app}\\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+          Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
           EOF
 
           echo "✅ windows_installer.iss generated"
@@ -373,7 +374,7 @@ jobs:
           !define ARCH    "${{ matrix.arch }}"
 
           Name "${APPNAME}"
-          OutFile "${APPNAME}-${VERSION}-${ARCH}-Installer.exe"
+          OutFile "${APPNAME}-v${VERSION}-windows-${ARCH}-Installer.exe"
           InstallDir "$PROGRAMFILES\\${APPNAME}"
           RequestExecutionLevel admin
           Unicode True
@@ -446,7 +447,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: nsis-windows-installer-${{ matrix.arch }}-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}
-          path: "${{ env.APP_NAME }}-${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-Installer.exe"
+          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-Installer.exe"
           retention-days: 30
           if-no-files-found: error
 
