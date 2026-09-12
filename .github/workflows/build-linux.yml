@@ -27,41 +27,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: ${{ env.FLUTTER_CHANNEL }}
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-
-      - name: Cache pub dependencies
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.pub-cache
-            .dart_tool
-          key: ${{ runner.os }}-preflight-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-preflight-pub-
-
-      - name: Get dependencies
-        run: flutter pub get
-
-      - name: Analyze code
-        run: flutter analyze --fatal-infos --fatal-warnings
-
-      # - name: Run tests
-      #   run: flutter test
 
       - name: Validate required assets
         run: |
           set -euo pipefail
-          test -f assets/logo.png || { 
+          test -f assets/logo.png || {
             echo "::error::assets/logo.png is required for AppImage"
             exit 1
           }
 
-          test -f assets/logo256.png || { 
+          test -f assets/logo256.png || {
             echo "::error::assets/logo256.png is required for Linux package icons"
             exit 1
           }
@@ -134,12 +109,38 @@ jobs:
             libgtk-3-dev liblzma-dev \
             appstream zip wget
 
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-preflight-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-preflight-pub-
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze --fatal-infos --fatal-warnings
+
       - name: Create .env from GitHub secrets
         run: |
           printf 'ENV_VAR1=%s\n' \
             "${{ secrets.ENV_VAR1 }}" > .env
-          
+
           chmod 600 .env
+
+      # - name: Run tests
+      #   run: flutter test
 
       - name: Build Linux (release)
         run: |
@@ -490,7 +491,7 @@ jobs:
         run: |
           printf 'ENV_VAR1=%s\n' \
             "${{ secrets.ENV_VAR1 }}" > .env
-          
+
           chmod 600 .env
 
       - name: Build Linux  (release)
@@ -579,7 +580,7 @@ jobs:
           - Automated CI build ${{ matrix.arch }}
           EOF
 
-          
+
 
           rpmbuild --define "_topdir $PWD/rpmbuild" --bb "rpmbuild/SPECS/app.spec"
 
