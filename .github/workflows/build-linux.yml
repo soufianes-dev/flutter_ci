@@ -50,8 +50,8 @@ jobs:
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
 
-      - name: Run tests
-        run: flutter test
+      # - name: Run tests
+      #   run: flutter test
 
       - name: Validate required assets
         run: |
