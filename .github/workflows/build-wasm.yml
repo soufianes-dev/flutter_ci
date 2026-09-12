@@ -12,8 +12,8 @@ env:
   FLUTTER_CHANNEL: "stable"
 
 jobs:
-  build-android:
-    name: Build and Deploy
+  build-wasm:
+    name: Build WASM
     runs-on: ubuntu-latest
 
     steps:
@@ -55,7 +55,7 @@ jobs:
           #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
           #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
           #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
-          flutter-version: ${{ env.FLUTTER_VERSION }} # TODO: Use latest version
+          flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: Cache pub dependencies
         uses: actions/cache@v6
@@ -67,14 +67,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pub-
 
-      # - name: Setup Flutter Dependencies
-      #   run: flutter pub get
-      # - name: Analyze Code
-      #   run: flutter analyze --fatal-infos --fatal-warnings
-      - name: Create Environment Variables File
-        run: echo "ENV_VAR1=$ENV_VAR1" > .env
-        env:
-          ENV_VAR1: ${{ secrets.ENV_VAR1 }}
+      - name: Analyze code
+        run: flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Create .env from GitHub secrets
+        run: |
+          printf 'ENV_VAR1=%s\n' \
+            "${{ secrets.ENV_VAR1 }}" > .env
+
+          chmod 600 .env
+
+      # - name: Run tests
+      #   run: flutter test
 
       - name: Build Web with WASM
         run: |
@@ -89,13 +93,33 @@ jobs:
 
       - name: Verify WASM output
         run: |
-          if [ ! -f "build/web/main.dart.wasm" ]; then
-            echo "❌ ERROR: WASM artifact (main.dart.wasm) not found."
+          set -euo pipefail
+
+          required_files=(
+            "build/web/index.html"
+            "build/web/flutter_bootstrap.js"
+            "build/web/main.dart.wasm"
+          )
+
+          for file in "$required_files[]"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error::Required WASM output not found: $file"
+              exit 1
+            fi
+          done
+
+          if [[ ! -d "build/web/assets" ]]; then
+            echo "::error::Flutter web assets directory not found"
             exit 1
           fi
 
+          echo "WASM build verification passed."
+
+
       - name: Package Web
         run: |
+          set -euo pipefail
+
           cd build/web
           zip -r "../../flutter-web-wasm-${{ env.APP_VERSION }}.zip" .
 
@@ -103,6 +127,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: web-wasm
-          path: "flutter-web-wasm-${{ env.APP_VERSION }}.zip"
+          path: "flutter-web-wasm-v${{ env.APP_VERSION }}.zip"
           if-no-files-found: ignore # To silently skip
           retention-days: 14

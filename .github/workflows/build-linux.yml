@@ -15,7 +15,7 @@ permissions:
 
 env:
   APP_PUBLISHER: "Soufiane Saadouni"
-  PACKAGE_NAME: "flutter-app1"
+  PACKAGE_NAME: "flutter-ci"
   FLUTTER_VERSION: "3.47.4"
   FLUTTER_CHANNEL: "stable"
   APPIMAGETOOL_VERSION: "1.9.1"

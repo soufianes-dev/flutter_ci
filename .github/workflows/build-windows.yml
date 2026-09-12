@@ -16,7 +16,7 @@ permissions:
 env:
   APP_TITLE: "FlutterCI"
   APP_PUBLISHER: "Soufiane Saadouni"
-  IDENTIFIER: "dev.soufianes.flutter-app1"
+  IDENTIFIER: "dev.soufianes.flutterci"
   FLUTTER_VERSION: "3.47.4"
   FLUTTER_CHANNEL: "stable"
 
@@ -104,8 +104,8 @@ jobs:
         run: |
           printf 'ENV_VAR1=%s\n' \
             "${{ secrets.ENV_VAR1 }}" > .env
-          
           chmod 600 .env
+
       # - name: Verify Formatting
       #   run: dart format --output=none --set-exit-if-changed .
 
@@ -171,32 +171,6 @@ jobs:
       #     mssstore publish `
       #       "${{ github.workspace }}/build/windows/x64/runner/Release/${{ env.APP_NAME }}-v${{ env.APP_VERSION }}.msix" `
       #       -id "${{ secrets.MICROSOFT_STORE_APP_ID }}"
-
-      # - name: Sign Built Binary with Signtool & Export CER
-      #   shell: powershell
-      #   run: |
-      #     # 1. Decode PFX from GitHub Secrets (from base 64 → .pfx file)
-      #     $pfxPath = "$env:TEMP\cert.pfx"
-      #     $bytes = [System.Convert]::FromBase64String("${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}")
-      #     [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
-
-      #     #2. Extract public .cer file directly for Inno Setup
-      #     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, "${{ secrets.WINDOWS_CERT_PASSWORD }}")
-      #     [System.IO.File]::WriteAllBytes("FlutterAppCodeSignCert.cer", $cert.Export([System.Security.Cryptography.X509CertificateContentType]::Cert))
-
-      #     # 3. Find the highest SDK version folder under bin
-      #     $sdkBin = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
-      #       Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
-      #       Sort-Object { [Version]$_.Name } -Descending |
-      #       Select-Object -First 1
-
-      #     $signtool = Join-Path $sdkBin.FullName "x64\signtool.exe"
-
-      #     # 4. Sign the executable
-      #     & $signtool sign /fd SHA256 /f $pfxPath /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /tr http://timestamp.digicert.com /td SHA256 "build\windows\x64\runner\Release\${{ env.APP_NAME }}.exe"
-
-      #     # 5. Clean up PFX file from runner disk
-      #     Remove-Item -Path $pfxPath -Force
 
       - name: Upload debug symbols
         uses: actions/upload-artifact@v7
@@ -305,31 +279,6 @@ jobs:
           file "$INSTALLER" || true
           echo "✅ Installer verified"
 
-      # - name: Sign Generated Installer
-      #   shell: powershell
-      #   run: |
-      #     # 1. Decode PFX from GitHub Secrets (from base 64 → .pfx file)
-      #     $pfxPath = "$env:TEMP\cert.pfx"
-      #     $bytes = [System.Convert]::FromBase64String("${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}")
-      #     [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
-
-      #     #2. Extract public .cer file directly for Inno Setup
-      #     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, "${{ secrets.WINDOWS_CERT_PASSWORD }}")
-      #     [System.IO.File]::WriteAllBytes("FlutterAppCodeSignCert.cer", $cert.Export([System.Security.Cryptography.X509CertificateContentType]::Cert))
-
-      #     # 3. Find the highest SDK version folder under bin
-      #     $sdkBin = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
-      #       Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
-      #       Sort-Object { [Version]$_.Name } -Descending |
-      #       Select-Object -First 1
-
-      #     $signtool = Join-Path $sdkBin.FullName "x64\signtool.exe"
-
-      #     # 4. Sign the executable
-      #     & $signtool sign /fd SHA256 /f $pfxPath /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /tr http://timestamp.digicert.com /td SHA256 "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-setup.exe"
-
-      #     # 5. Clean up PFX file from runner disk
-      #     Remove-Item -Path $pfxPath -Force
 
       - name: Upload Inno Installer
         uses: actions/upload-artifact@v7
