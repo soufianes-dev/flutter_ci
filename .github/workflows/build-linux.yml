@@ -288,7 +288,7 @@ jobs:
           mkdir -p "$PKG_DIR/usr/share/icons/hicolor/256x256/apps"
 
           # Copy full bundle to usr/lib
-          cp -r "$BUNDLE_DIR"/* "$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}/"
+          cp -a "$BUNDLE_DIR"/. "$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}/"
 
           cp \
             "assets/logo256.png" \
@@ -298,6 +298,7 @@ jobs:
           ln -s "/usr/lib/${{ env.PACKAGE_NAME }}/${{ env.APP_NAME }}" \
             "$PKG_DIR/usr/bin/${{ env.APP_NAME }}"
 
+          # Desktop entry
           cat > "$PKG_DIR/usr/share/applications/${{ env.PACKAGE_NAME }}.desktop" <<EOF
           [Desktop Entry]
           Name=${{ env.APP_NAME }}
@@ -309,11 +310,33 @@ jobs:
           StartupNotify=true
           EOF
 
+          SHLIBS_DIR=".dpkg-shlibdeps"
+          trap 'rm -rf "$SHLIBS_DIR"' EXIT
+          mkdir -p "$SHLIBS_DIR/debian"
+
+          cat > "$SHLIBS_DIR/debian/control" <<EOF
+          Source: ${{ env.PACKAGE_NAME }}
+          Package: ${{ env.PACKAGE_NAME }}
+          Architecture: ${{ matrix.deb_arch }}
+          Description: Flutter Linux application ${{ matrix.arch }}
+          EOF
+
+          APP_BINARY="$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}/${{ env.APP_NAME }}"
+
+          if [[ ! -x "$APP_BINARY" ]]; then
+            echo "::error::Flutter executable not found or is not executable: $APP_BINARY"
+            exit 1
+          fi
+
+          # Calculate runtime dependencies
           SHLIBS_DEPENDS="$(
-            dpkg-shlibdeps \
-              -O \
-              -e"$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}/${{ env.APP_NAME }}" \
-              | sed -n 's/^shlibs:Depends=//p'
+            (
+              cd "$SHLIBS_DIR"
+              dpkg-shlibdeps \
+                -O \
+                -l"../$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}" \
+                -e"../$APP_BINARY"
+              ) | sed -n 's/^shlibs:Depends=//p'
           )"
 
           if [[ -z "$SHLIBS_DEPENDS" ]]; then
@@ -321,6 +344,10 @@ jobs:
             exit 1
           fi
 
+          echo "Detected runtime dependencies:"
+          echo "$SHLIBS_DEPENDS"
+
+          # Generate binary package metadata
           cat > "$PKG_DIR/DEBIAN/control" <<EOF
           Package: ${{ env.PACKAGE_NAME }}
           Version: ${{ env.APP_VERSION }}
@@ -332,9 +359,14 @@ jobs:
           Priority: optional
           EOF
 
-          # Build package
+          # Build .deb package
           dpkg-deb --build --root-owner-group "$PKG_DIR"
           echo "DEB_NAME=${PKG_DIR}.deb" >> "$GITHUB_ENV"
+
+
+          # Validate resulting package
+          dpkg-deb --info "${PKG_DIR}.deb"
+          dpkg-deb --contents "${PKG_DIR}.deb"
 
       - name: Smoke-test packages
         run: |
