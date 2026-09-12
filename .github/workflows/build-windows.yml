@@ -1,31 +1,25 @@
 name: Build Windows
-
 on:
   workflow_dispatch:
   # push:
   #   branches:
   #     - main
-
 concurrency:
   group: windows-build-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 env:
   APP_TITLE: "FlutterCI"
   APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutterci"
   FLUTTER_VERSION: "3.47.4"
   FLUTTER_CHANNEL: "stable"
-
 jobs:
   build-windows:
     name: Build MSIX + Inno Setup (${{ matrix.arch }})
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 25
-
     strategy:
       fail-fast: false
       matrix:
@@ -47,8 +41,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@v7
       - name: Extract metadata from pubspec.yaml
         shell: bash
         id: meta
@@ -75,7 +68,6 @@ jobs:
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -83,7 +75,6 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           architecture: ${{ matrix.flutter_arch }}
           cache: true
-
       - name: Cache pub dependencies
         uses: actions/cache@v6
         with:
@@ -93,13 +84,10 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.arch }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.arch }}-pub-
-
       - name: Get dependencies
         run: flutter pub get
-
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
-
       - name: Create .env from GitHub secrets
         run: |
           printf 'ENV_VAR1=%s\n' \
@@ -112,6 +100,17 @@ jobs:
       # - name: Run Tests
       #   run: flutter test
 
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          flutter build windows `
+            --release `
+            --dart-define-from-file=.env `
+            --obfuscate `
+            --split-debug-info=symbols/windows/${{ matrix.arch }} `
+            --build-name=${{ env.APP_VERSION }} `
+            --build-number=${{ env.BUILD_NUMBER }} `
+            --target lib/main.dart
       - name: Build unsigned MSIX (for Windows Store)
         shell: pwsh
         run: |
@@ -121,6 +120,10 @@ jobs:
             exit 1
           }
 
+          # https://copilot.microsoft.com/shares/4kTpnqdanWqqhABTKCMrp
+          # https://admin.cloud.microsoft/
+          # https://myaccount.microsoft.com/
+          # https://entra.microsoft.com/
           # Get Windows Publisher ID from → https://partner.microsoft.com/en-us/dashboard/account/v3/organization/identity
           dart run msix:create `
           --architecture "${{ matrix.msix_arch }}" `
@@ -135,21 +138,28 @@ jobs:
           --protocol-activation "http,https" `
           --execution-alias "${{ env.APP_NAME }}" `
           --store true `
-          --windows-build-args "--release --dart-define-from-file=.env --obfuscate --split-debug-info=symbols/windows/${{ matrix.arch }} --build-name=${{ env.APP_VERSION }} --build-number=${{ env.BUILD_NUMBER }} --target lib/main.dart"
+          --build-windows false `
+          --output-name ${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned `
+          --output-path .
 
-          # Confirm MSIX actually appeared
-          $msix = Get-ChildItem -Path "build/windows/${{ matrix.arch }}/runner/Release" -Filter "*.msix" -ErrorAction SilentlyContinue
-          if (-not $msix) {
-            Write-Error "::error::No .msix file was produced"
+          $msixName = "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned.msix"
+
+          if (-not (Test-Path $msixName -PathType Leaf)) {
+            Write-Error "::error::Expected MSIX not found: $msixName"
             exit 1
           }
-          Write-Host "✅ MSIX created: $($msix.Name)"
 
+          if ((Get-Item $msixName).Length -le 0) {
+            Write-Error "::error::MSIX is empty: $msixName"
+            exit 1
+          }
+
+          Write-Host "✅ MSIX created: $msixName"
       - name: Upload MSIX
         uses: actions/upload-artifact@v7
         with:
-          name: msix-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}
-          path: "build/windows/${{ matrix.arch }}/runner/Release/*.msix"
+          name: msix-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned
+          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned.msix"
           retention-days: 30
           if-no-files-found: error
 
@@ -159,18 +169,18 @@ jobs:
       # - name: Configure Store Credentials
       #   shell: pwsh
       #   run: |
-      #     mssstore reconfigure `
-      #       --tenantId "${{ secrets.AZURE_AD_TENANT_ID }}" `
-      #       --sellerId "${{ secrets.SELLER_ID }}" `
-      #       --clientId "${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}" `
-      #       --clientSecret "${{ secrets.AZURE_AD_APPLICATION_SECRET }}"
+      #     msstore reconfigure `
+      #       --tenantId "${{ secrets.PARTNER_CENTER_TENANT_ID }}" `
+      #       --sellerId "${{ secrets.PARTNER_CENTER_SELLER_ID }}" `
+      #       --clientId "${{ secrets.PARTNER_CENTER_CLIENT_ID }}" `
+      #       --clientSecret "${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}"
 
       # - name: Publish to Microsoft Store
       #   shell: pwsh
       #   run: |
-      #     mssstore publish `
+      #     msstore publish `
       #       "${{ github.workspace }}/build/windows/x64/runner/Release/${{ env.APP_NAME }}-v${{ env.APP_VERSION }}.msix" `
-      #       -id "${{ secrets.MICROSOFT_STORE_APP_ID }}"
+      #       -id "${{ secrets.MS_STORE_APP_ID }}"
 
       - name: Upload debug symbols
         uses: actions/upload-artifact@v7
@@ -179,18 +189,8 @@ jobs:
           path: symbols/windows/${{ matrix.arch }}
           if-no-files-found: ignore # To silently skip
           retention-days: 14
-
-      - name: Cache Chocolatey / Inno Setup
-        uses: actions/cache@v6
-        with:
-          path: |
-            C:\ProgramData\chocolatey\bin
-            C:\ProgramData\chocolatey\lib
-          key: ${{ runner.os }}-${{ matrix.arch }}-choco-innosetup-v1
-
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
-
       - name: Generate Inno Setup Script
         shell: bash
         run: |
@@ -228,7 +228,7 @@ jobs:
           ; Cleaner UX
           DisableProgramGroupPage=yes
           OutputDir=.
-          OutputBaseFilename=${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup
+          OutputBaseFilename=${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup-unsigned
           Compression=lzma2/ultra64
           SolidCompression=yes
           WizardStyle=modern
@@ -240,7 +240,7 @@ jobs:
           CloseApplications=yes
           RestartApplications=no
           ; Uncomment for silent installs (winget, choco friendly)
-          ; SilentInstall=1 
+          ; SilentInstall=1
 
           [Languages]
           Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -261,36 +261,30 @@ jobs:
           EOF
 
           echo "✅ windows_installer.iss generated"
-
       - name: Build Inno setup installer
         run: |
           ISCC.exe "windows_installer.iss"
-
       - name: Verify installer
         shell: bash
         run: |
           set -euo pipefail
 
-          INSTALLER="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup.exe"
+          INSTALLER="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup-unsigned.exe"
           if [ ! -s "$INSTALLER" ]; then
             echo "::error:: Installer missing or empty!"
             exit 1
           fi
           file "$INSTALLER" || true
           echo "✅ Installer verified"
-
-
       - name: Upload Inno Installer
         uses: actions/upload-artifact@v7
         with:
-          name: windows-${{ matrix.arch }}-installer-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}
-          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup.exe"
+          name: windows-${{ matrix.arch }}-installer-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-unsigned
+          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup-unsigned.exe"
           retention-days: 30
           if-no-files-found: error
-
       - name: Install NSIS
         run: choco install nsis -y --no-progress
-
       - name: Add NSIS to PATH
         shell: pwsh
         run: |
@@ -305,7 +299,6 @@ jobs:
               Write-Host "Added to PATH: $p"
             }
           }
-
       - name: Generate NSIS script
         shell: bash
         run: |
@@ -322,20 +315,20 @@ jobs:
           !define ARCH    "${{ matrix.arch }}"
 
           Name "${APPNAME}"
-          OutFile "${APPNAME}-v${VERSION}-windows-${ARCH}-Installer.exe"
-          InstallDir "$PROGRAMFILES\\${APPNAME}"
+          OutFile "${APPNAME}-v${VERSION}-windows-${ARCH}-Installer-unsigned.exe"
+          InstallDir "$PROGRAMFILES\${APPNAME}"
           RequestExecutionLevel admin
           Unicode True
 
           ; ----- Modern UI settings -----
           !define MUI_ABORTWARNING
-          !define MUI_ICON "${NSISDIR}\\Contrib\\Graphics\\Icons\\modern-install.ico"
-          !define MUI_UNICON "${NSISDIR}\\Contrib\\Graphics\\Icons\\modern-uninstall.ico"
+          !define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
+          !define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
 
           ; Optional: custom header/welcome bitmaps (place files in repo)
           ; !define MUI_HEADERIMAGE
-          ; !define MUI_HEADERIMAGE_BITMAP "assets\\nsis-header.bmp"
-          ; !define MUI_WELCOMEFINISHPAGE_BITMAP "assets\\nsis-wizard.bmp"
+          ; !define MUI_HEADERIMAGE_BITMAP "assets\nsis-header.bmp"
+          ; !define MUI_WELCOMEFINISHPAGE_BITMAP "assets\nsis-wizard.bmp"
 
           ; ----- Pages -----
           !insertmacro MUI_PAGE_WELCOME
@@ -363,12 +356,12 @@ jobs:
 
             ; Uninstaller
             WriteUninstaller "$INSTDIR\Uninstall.exe"
-            
+
             ; Add/remove Programs entry
             WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
               "DisplayName" "${APPNAME}"
             WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
-              "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+              "UninstallString" '"$INSTDIR\Uninstall.exe"'
             WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
               "DisplayVersion" "${VERSION}"
             WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" \
@@ -390,12 +383,11 @@ jobs:
         # Compile NSIS installer
       - name: Package with NSIS
         run: makensis installer.nsi
-
       - name: Upload NSIS Installer
         uses: actions/upload-artifact@v7
         with:
-          name: nsis-windows-installer-${{ matrix.arch }}-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}
-          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-Installer.exe"
+          name: nsis-windows-installer-${{ matrix.arch }}-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-unsigned
+          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-Installer-unsigned.exe"
           retention-days: 30
           if-no-files-found: error
 
@@ -412,9 +404,9 @@ jobs:
           $Arch = "${{ matrix.arch }}"
 
           $Source = "build/windows/$Arch/runner/Release"
-          $Dest = "$AppName-v$Version-windows-$Arch.zip"
+          $Dest = "$AppName-v$Version-windows-$Arch-portable-unsigned.zip"
 
-          if (-Not (Test-Path $Source -PathType Container)) { 
+          if (-Not (Test-Path $Source -PathType Container)) {
             Write-Error "::error::Windows release directory not found: $Source"
             exit 1
           }
@@ -444,15 +436,13 @@ jobs:
           }
 
           Write-Host "ZIP package created: $Dest"
-
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
-          name: windows-${{ matrix.arch }}-portable-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}
-          path: ${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}.zip
+          name: windows-${{ matrix.arch }}-portable-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-unsigned
+          path: ${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-portable-unsigned.zip
           retention-days: 30
           if-no-files-found: error
-
       - name: Clean up .env
         if: always()
         shell: bash

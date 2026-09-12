@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Extract metadata from pubspec.yaml
         id: meta
@@ -114,7 +114,6 @@ jobs:
           fi
 
           echo "WASM build verification passed."
-
 
       - name: Package Web
         run: |

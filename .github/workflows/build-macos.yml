@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Extract metadata from pubspec.yaml
         id: meta
@@ -81,7 +81,7 @@ jobs:
         run: |
           printf 'ENV_VAR1=%s\n' \
             "${{ secrets.ENV_VAR1 }}" > .env
-          
+
           chmod 600 .env
 
       # - name: Verify Formatting

@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       # Needed for proper version tagging
 
       - name: Setup Java
@@ -116,6 +116,7 @@ jobs:
           bundler-cache: true
           working-directory: ${{ env.WORKING_DIR }}
 
+      # TODO:
       - name: Build and Deploy with Fastlane
         run: |
           echo "$PLAY_STORE_CONFIG_JSON" > flutter-ci-432e4-b2e456c83eaa.json
