@@ -17,7 +17,7 @@ env:
   APP_TITLE: "FlutterCI"
   APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutter-app1"
-  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_VERSION: "3.47.4"
   FLUTTER_CHANNEL: "stable"
 
 jobs:
@@ -100,13 +100,12 @@ jobs:
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
 
-      - name: Create .env from GitHub Secrets
-        shell: bash
+      - name: Create .env from GitHub secrets
         run: |
-          cat > .env <<EOF
-          ENV_VAR1=${{ secrets.ENV_VAR1 }}
-          EOF
-
+          printf 'ENV_VAR1=%s\n' \
+            "${{ secrets.ENV_VAR1 }}" > .env
+          
+          chmod 600 .env
       # - name: Verify Formatting
       #   run: dart format --output=none --set-exit-if-changed .
 
@@ -483,7 +482,7 @@ jobs:
             -mx=9 `
             $Dest `
             "$Source\*"
-          
+
           if ($LASTEXITCODE -ne 0) {
             Write-Error "::error::7-Zip failed to create package"
             exit 1
@@ -496,7 +495,6 @@ jobs:
           }
 
           Write-Host "ZIP package created: $Dest"
-
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v7

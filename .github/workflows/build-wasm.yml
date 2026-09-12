@@ -1,0 +1,108 @@
+name: Build WASM
+
+on:
+  # push:
+  #   branches:
+  #     - main
+  # Enable manual run through GitHub UI
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.47.4"
+  FLUTTER_CHANNEL: "stable"
+
+jobs:
+  build-android:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Extract metadata from pubspec.yaml
+        id: meta
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          #cache: true
+          #cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
+          #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          flutter-version: ${{ env.FLUTTER_VERSION }} # TODO: Use latest version
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      # - name: Setup Flutter Dependencies
+      #   run: flutter pub get
+      # - name: Analyze Code
+      #   run: flutter analyze --fatal-infos --fatal-warnings
+      - name: Create Environment Variables File
+        run: echo "ENV_VAR1=$ENV_VAR1" > .env
+        env:
+          ENV_VAR1: ${{ secrets.ENV_VAR1 }}
+
+      - name: Build Web with WASM
+        run: |
+          flutter build web \
+            --wasm \
+            --release \
+            --build-name=${{ env.APP_VERSION }} \
+            --build-number=${{ env.BUILD_NUMBER }} \
+            --dart-define-from-file=.env \
+            --base-href / \
+            --target lib/main.dart
+
+      - name: Verify WASM output
+        run: |
+          if [ ! -f "build/web/main.dart.wasm" ]; then
+            echo "❌ ERROR: WASM artifact (main.dart.wasm) not found."
+            exit 1
+          fi
+
+      - name: Package Web
+        run: |
+          cd build/web
+          zip -r "../../flutter-web-wasm-${{ env.APP_VERSION }}.zip" .
+
+      - name: Upload web WASM
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-wasm
+          path: "flutter-web-wasm-${{ env.APP_VERSION }}.zip"
+          if-no-files-found: ignore # To silently skip
+          retention-days: 14

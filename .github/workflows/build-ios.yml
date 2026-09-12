@@ -10,7 +10,7 @@ on:
       - main
 
 env:
-  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_VERSION: "3.47.4"
   FLUTTER_CHANNEL: "stable"
   JAVA_VERSION: "17"
   XCODE_VERSION: "26.4" # Stable Xcode version # TODO: Use latest version
@@ -93,9 +93,10 @@ jobs:
 
       - name: Create .env from GitHub secrets
         run: |
-          cat > .env <<'EOF'
-          ENV_VAR1=${{ secrets.ENV_VAR1 }}
-          EOF
+          printf 'ENV_VAR1=%s\n' \
+            "${{ secrets.ENV_VAR1 }}" > .env
+          
+          chmod 600 .env
 
       - name: Build iOS application (simulator build)
         run: flutter build ios --simulator --no-codesign
@@ -281,7 +282,7 @@ jobs:
 
           # Collect screenshots wherever Maestro dropped them
           find . -path ./maestro -prune -o -maxdepth 3 -name '*.png' -print -exec mv {} maestro/maestro_outputs/ \;
-          
+
           if [ -n "$(ls -A maestro/maestro_outputs 2>/dev/null)" ]; then
             zip -r maestro/maestro_outputs.zip maestro/maestro_outputs/
           else

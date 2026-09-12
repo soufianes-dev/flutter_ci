@@ -21,7 +21,7 @@ on:
           - production
 
 env:
-  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_VERSION: "3.47.4"
   FLUTTER_CHANNEL: "stable"
   JAVA_VERSION: "11"
   JAVA_DISTRIBUTION: "temurin"
@@ -77,10 +77,8 @@ jobs:
 
       # - name: Setup Flutter Dependencies
       #   run: flutter pub get
-
       # - name: Analyze Code
       #   run: flutter analyze --fatal-infos --fatal-warnings
-
       - name: Create Environment Variables File
         run: echo "ENV_VAR1=$ENV_VAR1" > .env
         env:

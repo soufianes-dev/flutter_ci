@@ -15,7 +15,7 @@ permissions:
 
 env:
   IDENTIFIER: "dev.soufianes.flutterci"
-  FLUTTER_VERSION: "3.47.2"
+  FLUTTER_VERSION: "3.47.4"
   FLUTTER_CHANNEL: "stable"
 
 jobs:
@@ -79,9 +79,10 @@ jobs:
 
       - name: Create .env from GitHub secrets
         run: |
-          cat > .env <<EOF
-          ENV_VAR1=${{ secrets.ENV_VAR1 }}
-          EOF
+          printf 'ENV_VAR1=%s\n' \
+            "${{ secrets.ENV_VAR1 }}" > .env
+          
+          chmod 600 .env
 
       # - name: Verify Formatting
       #   run: dart format --output=none --set-exit-if-changed .
@@ -100,11 +101,31 @@ jobs:
             --build-number=${{ env.BUILD_NUMBER }} \
             --target lib/main.dart
 
+      - name: Package debug symbols
+        run: |
+          set -euo pipefail
+
+          SYMBOLS_DIR="symbols/macos"
+
+          if [[ ! -d "$SYMBOLS_DIR" ]]; then
+            echo "No debug symbols generated"
+            exit 0
+          fi
+
+          SYMBOLS_ARCHIVE=${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-macos-${{ matrix.arch }}-symbols.tar.gz
+
+          tar \
+            -czf "$SYMBOLS_ARCHIVE" \
+            -C "$SYMBOLS_DIR" \
+            .
+
+          echo "SYMBOLS_ARCHIVE=$SYMBOLS_ARCHIVE" >> "$GITHUB_ENV"
+
       - name: Upload debug symbols
         uses: actions/upload-artifact@v7
         with:
-          name: macos-debug-symbols-${{ env.APP_VERSION }}
-          path: symbols/macos
+          name: macos-debug-symbols-${{ matrix.arch }}-${{ env.APP_VERSION }}
+          path: ${{ env.SYMBOLS_ARCHIVE }}
           if-no-files-found: ignore # To silently skip
           retention-days: 14
 
