@@ -4,6 +4,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../env.dart';
+
 //TODO regexp
 
 class Login extends StatefulWidget {
@@ -40,7 +42,6 @@ class _LoginState extends State<Login> {
                         mainAxisAlignment: .center,
                         crossAxisAlignment: .center,
                         children: [
-                          const Text("LOGO"),
                           const SizedBox(height: 16.0),
                           Text(
                             key: Key("login"),
@@ -136,6 +137,20 @@ class _LoginState extends State<Login> {
                               }
                             },
                             child: const Text("submit"),
+                          ),
+                          const SizedBox(height: 16.0),
+
+                          Column(
+                            mainAxisSize: .min,
+                            crossAxisAlignment: .start,
+                            spacing: 2.0,
+                            children: [
+                              Text("BUILD_NAME:      ${Env.buildName}"),
+                              Text("BUILD_NUMBER:    ${Env.buildNumber}"),
+                              Text("GIT_SHA:         ${Env.gitSha}"),
+                              Text("GIT_BRANCH:      ${Env.gitBranch}"),
+                              Text("BUILD_TIMESTAMP: ${Env.buildTimestamp}"),
+                            ],
                           ),
                         ],
                       ),

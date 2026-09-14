@@ -124,7 +124,7 @@ jobs:
       - name: Upload debug symbols
         uses: actions/upload-artifact@v7
         with:
-          name: macos-debug-symbols-${{ matrix.arch }}-${{ env.APP_VERSION }}
+          name: macos-debug-symbols-v${{ env.APP_VERSION }}
           path: ${{ env.SYMBOLS_ARCHIVE }}
           if-no-files-found: ignore # To silently skip
           retention-days: 14
@@ -180,7 +180,7 @@ jobs:
       - name: Upload installers
         uses: actions/upload-artifact@v7
         with:
-          name: macos-installers-${{ env.APP_VERSION }}
+          name: macos-unsigned-installers-v${{ env.APP_VERSION }}
           path: |
             ${{ env.DMG_NAME }}
             ${{ env.PKG_NAME }}

@@ -22,9 +22,6 @@ jobs:
   build-ios:
     runs-on: macos-latest
 
-    env:
-      ENV_VAR1: ${{ secrets.ENV_VAR1 }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -91,7 +88,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pub-
 
-      - name: Create .env from GitHub secrets
+      - name: Create .env
         run: |
           printf 'ENV_VAR1=%s\n' \
             "${{ secrets.ENV_VAR1 }}" > .env

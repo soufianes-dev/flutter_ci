@@ -70,7 +70,7 @@ jobs:
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
 
-      - name: Create .env from GitHub secrets
+      - name: Create .env
         run: |
           printf 'ENV_VAR1=%s\n' \
             "${{ secrets.ENV_VAR1 }}" > .env
