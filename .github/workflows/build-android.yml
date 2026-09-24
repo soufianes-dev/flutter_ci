@@ -1,5 +1,4 @@
 name: Android Build
-
 on:
   # push:
   #   branches:
@@ -18,44 +17,66 @@ on:
           - open
           - production
           - firebase # Distribute to Firebase App Distribution
-          - promote_to_production
           - promote_internal_to_closed
           - promote_closed_to_open
           - promote_open_to_production
           - promote_closed_to_production
-
 env:
-  FLUTTER_VERSION: "3.47.4"
+  FLUTTER_VERSION: "3.47.5"
   FLUTTER_CHANNEL: "stable"
   JAVA_VERSION: "11"
   JAVA_DISTRIBUTION: "temurin"
   RUBY_VERSION: "3.3"
   WORKING_DIR: "android"
+  ANDROID_PACKAGE_NAME: "dev.soufianes.flutterci"
 
 jobs:
   build-android:
     name: Build and Deploy
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+      - name: Extract metadata from pubspec.yaml
+        id: meta
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+          echo "name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           cache: "gradle"
-      - name: Setup Flutter
+      - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
-          #cache: true
-          #cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
-          #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
-          #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
-          #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
           flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -73,51 +94,57 @@ jobs:
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
-
-      # NOTE: Convert keystore.properties to base64: `base64 -i android/upload-keystore.jks`
+      # NOTE: Convert key.properties to base64: `base64 -i android/app/upload-keystore.jks`
       # and add it to github secrets
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
       - name: Configure signing
         env:
           KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
           KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
           KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        working-directory: ${{ env.WORKING_DIR }}
         run: |
-          cat > android/keystore.properties <<EOF
+          cat > android/key.properties <<EOF
           storePassword=${KEYSTORE_STORE_PASSWORD}
           keyPassword=$KEYSTORE_KEY_PASSWORD
           keyAlias=$KEYSTORE_KEY_ALIAS
-          storeFile=android/upload-keystore.jks
+          storeFile=android/app/upload-keystore.jks
           EOF
-
-        working-directory: ${{ env.WORKING_DIR }}
-
       # Setup Ruby, Bundler, and Gemfile dependencies
       - name: Install Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-          working-directory: ${{ env.WORKING_DIR }}
-
       # TODO:
-      - name: Build and Deploy with Fastlane
+      - name: Build with Fastlane
+        env:
+          APP_NAME: ${{ env.APP_NAME }}
+          BUILD_NAME: ${{ env.BUILD_NAME }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
+          BUILD_TYPE: "debug"
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          RUNNER_NAME: ${{ runner.name }}
+          ANDROID_PACKAGE_NAME: ${{ env.ANDROID_PACKAGE_NAME }}
+          FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          FIREBASE_TESTERS: ${{ secrets.FIREBASE_TESTERS }}
+          CI_PIPELINE_ID: ${{ github.run_id }}
+          BUILD_HOST: ${{ runner.name }}
         run: |
-          echo "$PLAY_STORE_CONFIG_JSON" > flutter-ci-432e4-b2e456c83eaa.json
-          # Validate flutter-ci-432e4-b2e456c83eaa.json
-          fastlane run validate_play_store_json_key json_key:flutter-ci-432e4-b2e456c83eaa.json
+          fastlane add_plugin firebase_app_distribution
           bundle install
           bundle exec fastlane build_all_android_artifacts
+
+          # Validate flutter-ci-432e4-b2e456c83eaa.json
+          # fastlane run validate_play_store_json_key json_key:flutter-ci-432e4-b2e456c83eaa.json
           # TODO: Publish
           # bundle exec fastlane ${{ github.event.inputs.lane || 'internal' }}
-        env:
-          PLAY_STORE_CONFIG_JSON: ${{ secrets.PLAY_STORE_CONFIG_JSON }}
-          FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
-          FIREBASE_CLI_TOKEN: ${{ secrets.FIREBASE_CLI_TOKEN }}
+
         working-directory: ${{ env.WORKING_DIR }}
       - name: Upload App Bundle
         if: always()
@@ -147,4 +174,4 @@ jobs:
           retention-days: 90
       - name: Cleanup keystore
         if: always()
-        run: rm -f android/upload-keystore.jks android/keystore.properties
+        run: rm -f android/app/upload-keystore.jks android/key.properties

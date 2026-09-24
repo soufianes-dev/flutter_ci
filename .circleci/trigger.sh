@@ -11,7 +11,7 @@ export USERNAME="soufiane-org"
 export REPO="flutterci"
 export CIRCLE_TOKEN=""
 export BRANCH="main"
-export FLUTTER_VERSION="3.47.4"
+export FLUTTER_VERSION="3.47.5"
 export XCODE_VERSION="26.4.0"
 
 

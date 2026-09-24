@@ -1,41 +1,198 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="fastlane.lanes">
-
-
-    <testcase classname="fastlane.lanes" name="0: default_platform" time="0.000554407">
-
-    </testcase>
-
-
-    <testcase classname="fastlane.lanes" name="1: Switch to android build_android_app lane"
-      time="0.007917473">
-
-    </testcase>
-
-
-    <testcase classname="fastlane.lanes" name="2: Switch to android clean_builds lane"
-      time="0.000387032">
-
-    </testcase>
-
-
-    <testcase classname="fastlane.lanes" name="3: flutter clean" time="11.335138328">
-
-    </testcase>
-
-
-    <testcase classname="fastlane.lanes" name="4: Switch to android build_aab lane"
-      time="0.000478069">
-
-    </testcase>
-
-
-    <testcase classname="fastlane.lanes"
-      name="5: flutter build appbundle --obfuscate --split-debug-info=android/debug-info --dart-define-from-file=.env --build-name=1.0.0 --build-number=1"
-      time="254.225941542">
-
-    </testcase>
-
+    
+    
+    
+      
+      <testcase classname="fastlane.lanes" name="00: default_platform" time="0.000204585">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="01: Switch to android validate_environment lane" time="0.000668644">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="02: Switch to android require_command lane" time="0.000411076">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="03: Switch to android require_command lane" time="0.000175286">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="04: Switch to android require_command lane" time="0.000101749">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="05: Switch to android require_command lane" time="0.000101279">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="06: Switch to android validate_build_version lane" time="0.000102361">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="07: Switch to android validate_disk_space lane" time="0.000106141">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="08: df -Pk . | awk &apos;NR==2 {print $4}&apos;" time="0.004163133">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="09: Switch to android clean_builds lane" time="0.000169127">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="10: flutter clean" time="0.96101586">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="11: Switch to android install_dependencies lane" time="0.000237068">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="12: flutter pub get" time="1.365168221">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="13: Switch to android check_formatting lane" time="0.000186146">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="14: dart format --output=none --set-exit-if-changed ." time="0.299918998">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="15: Switch to android run_code_analysis lane" time="9.7893e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="16: flutter analyze" time="2.463539422">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="17: Switch to android build_release_apk lane" time="0.000157089">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="18: Switch to android dart_define_args lane" time="0.000168422">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="19: Switch to android flutter_version_info lane" time="0.000151626">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="20: flutter --version --machine" time="0.352804891">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="21: Switch to android dart_version_info lane" time="0.00016672">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="22: dart --version 2&gt;&amp;1" time="0.028408766">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="23: Switch to android git_commit_sha lane" time="0.000101114">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="24: git rev-parse HEAD" time="0.002001327">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="25: Switch to android git_branch_name lane" time="0.00020254">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="26: git rev-parse --abbrev-ref HEAD" time="0.001714619">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="27: flutter build apk --release --obfuscate --split-debug-info\=symbols/android --build-name\=1.0.0 --build-number\=1 --dart-define\=ANDROID_PACKAGE_NAME\=dev.soufianes.flutterci --dart-define\=BUILD_NAME\=1.0.0 --dart-define\=BUILD_NUMBER\=1 --dart-define\=BUILD_FLAVOR\=production --dart-define\=BUILD_TYPE\=release --dart-define\=CI_PIPELINE_ID\=local-1789934718 --dart-define\=BUILD_HOST\=sandbox --dart-define\=OS_TARGET\=android-arm64 --dart-define\=COMPILER_VERSION\=Flutter\ 3.47.5\ \(stable\),\ Dart\ SDK\ version:\ 3.13.4\ \(stable\)\ \(Tue\ Sep\ 15\ 01:01:15\ 2026\ -0700\)\ on\ \&quot;linux_x64\&quot; --dart-define\=DEPENDENCY_LOCK_HASH\=d116512ee716 --dart-define\=SIGNING_CERTIFICATE\=Android\ Keystore/SHA256 --dart-define\=DEVICE_COMPATIBILITY\=Android\ 7.0+\ \(API\ 24\) --dart-define\=API_BASE_URL\= --dart-define\=GIT_SHA\=701880da00f4afaaa0bf9337b3c20e4ceff39e77 --dart-define\=GIT_BRANCH\=main --dart-define\=BUILD_TIMESTAMP\=2026-09-20T20:05:18Z" time="302.72164516">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="28: Switch to android validate_apk_artifact lane" time="0.020312894">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="29: Switch to android validate_artifact lane" time="0.003041806">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="30: Switch to android require_file lane" time="0.004652611">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="31: Switch to android artifact_filename lane" time="0.003024756">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="32: Switch to android copy_artifact lane" time="0.001695173">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="33: Switch to android require_file lane" time="0.001218725">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="34: Switch to android generate_checksums lane" time="0.001320561">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="35: Switch to android prepare_fastlane_directories lane" time="0.001726565">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="36: Switch to android generate_build_manifest lane" time="0.002032961">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="37: Switch to android prepare_fastlane_directories lane" time="0.002641068">
+        
+      </testcase>
+    
   </testsuite>
 </testsuites>

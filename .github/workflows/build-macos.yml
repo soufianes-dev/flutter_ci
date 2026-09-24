@@ -1,33 +1,36 @@
 name: Build MacOS
-
 on:
   workflow_dispatch:
   # push:
   #   branches:
   #     - main
-
 concurrency:
   group: macos-build-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 env:
+  APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutterci"
-  FLUTTER_VERSION: "3.47.4"
+  FLUTTER_VERSION: "3.47.5"
   FLUTTER_CHANNEL: "stable"
-
 jobs:
   build-macos:
     name: Build & Package
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 20
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-
+      - name: Detect architecture
+        run: |
+          set -euo pipefail
+          ARCH_UNAME=$(uname -m)
+          if [[ "$ARCH_UNAME" == "arm64" ]]; then
+            echo "ARCH=arm64" >> "$GITHUB_ENV"
+          else
+            echo "ARCH=x64" >> "$GITHUB_ENV"
+          fi
       - name: Extract metadata from pubspec.yaml
         id: meta
         run: |
@@ -51,16 +54,15 @@ jobs:
           fi
 
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
-          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
-
-      - name: Setup Flutter
+          echo "PREFIX=${APP_NAME}-v${VERSION}-build.${BUILD}-macos-${{ env.ARCH }}" >> "$GITHUB_ENV"
+      - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-
       - name: Cache pub dependencies
         uses: actions/cache@v6
         with:
@@ -70,75 +72,75 @@ jobs:
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
-
       - name: Get dependencies
         run: flutter pub get
-
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
-
-      - name: Create .env from GitHub secrets
-        run: |
-          printf 'ENV_VAR1=%s\n' \
-            "${{ secrets.ENV_VAR1 }}" > .env
-
-          chmod 600 .env
-
-      # - name: Verify Formatting
-      #   run: dart format --output=none --set-exit-if-changed .
-
+      - name: Verify Formatting
+        run: dart format --output=none --set-exit-if-changed .
       # - name: Run Tests
       #   run: flutter test
-
-      - name: Build macOS
+      - name: Build macOS desktop app (${{ env.ARCH }})
         run: |
-          flutter build macos \
-            --release \
-            --dart-define-from-file=.env \
-            --obfuscate \
-            --split-debug-info=symbols/macos \
-            --build-name=${{ env.APP_VERSION }} \
-            --build-number=${{ env.BUILD_NUMBER }} \
-            --target lib/main.dart
 
-      - name: Package debug symbols
-        run: |
-          set -euo pipefail
-
-          SYMBOLS_DIR="symbols/macos"
-
-          if [[ ! -d "$SYMBOLS_DIR" ]]; then
-            echo "No debug symbols generated"
-            exit 0
+          lockfilePath="pubspec.lock"
+          lockHash=""
+          if [ -f "$lockfilePath" ]; then
+            # Compute SHA256 and take first 12 characters
+            lockHash=$(sha256sum "$lockfilePath" | awk '{print substr($1,1,12)}')
+          else
+            lockHash="no-lockfile"
           fi
 
-          SYMBOLS_ARCHIVE=${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-macos-${{ matrix.arch }}-symbols.tar.gz
+          buildTimestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          tar \
-            -czf "$SYMBOLS_ARCHIVE" \
-            -C "$SYMBOLS_DIR" \
-            .
+          gitCommitSha=$(git rev-parse HEAD)
+          gitBranchName=${{ github.ref_name }}
 
-          echo "SYMBOLS_ARCHIVE=$SYMBOLS_ARCHIVE" >> "$GITHUB_ENV"
+          flutterVersionOutput=$(flutter --version --machine)
+          flutterFwVersion=$(echo "$flutterVersionOutput" | jq -r '.frameworkVersion')
+          flutterChannel=$(echo "$flutterVersionOutput" | jq -r '.channel')
+          flutterVersionStr="Flutter $flutterFwVersion ($flutterChannel)"
 
+          dartVersionStr=$(dart --version 2>&1 | head -n 1)
+
+          flutter build macos \
+            --release \
+            --dart-define="IDENTIFIER=${{ env.IDENTIFIER }}" \
+            --dart-define="BUILD_NAME=${{ env.BUILD_NAME }}" \
+            --dart-define="BUILD_NUMBER=${{ env.BUILD_NUMBER }}" \
+            --dart-define="FLUTTER_VERSION=$flutterVersionStr" \
+            --dart-define="DART_VERSION=$dartVersionStr" \
+            --dart-define="DEPENDENCY_LOCK_HASH=$lockHash" \
+            --dart-define="BUILD_TIMESTAMP=$buildTimestamp" \
+            --dart-define="GIT_SHA=$gitCommitSha" \
+            --dart-define="GIT_BRANCH=$gitBranchName" \
+            --dart-define="CI_PIPELINE_ID=${{ github.run_id }}" \
+            --dart-define="BUILD_HOST=${{ runner.name }}" \
+            --dart-define="OS_TARGET=${{ runner.os }}" \
+            --dart-define="BUILD_TYPE=release" \
+            --dart-define="BUILD_FLAVOR=production" \
+            --obfuscate \
+            --split-debug-info=symbols/macos \
+            --build-name=${{ env.BUILD_NAME }} \
+            --build-number=${{ env.BUILD_NUMBER }} \
+            --target lib/main.dart
       - name: Upload debug symbols
         uses: actions/upload-artifact@v7
         with:
-          name: macos-debug-symbols-v${{ env.APP_VERSION }}
-          path: ${{ env.SYMBOLS_ARCHIVE }}
-          if-no-files-found: ignore # To silently skip
-          retention-days: 14
-
-      - name: Package DMG + PKG
+          name: ${{ env.PREFIX }}-debug-symbols
+          path: symbols/macos
+          if-no-files-found: error
+          retention-days: 30
+      - name: Package DMG
         run: |
           set -euo pipefail
 
           APP_PATH="build/macos/Build/Products/Release/${{ env.APP_NAME }}.app"
           test -d "$APP_PATH" || { echo "::error::App bundle not found"; exit 1; }
 
-          # Create DMG
           DMG_ROOT="build/macos/dmg"
-          DMG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-macos-unsigned.dmg"
+          DMG_NAME="${{ env.APP_NAME }}-v${{ env.BUILD_NAME }}-build.${{ env.BUILD_NUMBER }}-macos-unsigned.dmg"
           rm -rf "$DMG_ROOT" "$DMG_NAME"
           mkdir -p "$DMG_ROOT"
           # Copy application
@@ -153,40 +155,132 @@ jobs:
             -o "$DMG_NAME"
           echo "✅ Successfully Created DMG: $DMG_NAME"
 
-          # Create PKG
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+      - name: Package PKG
+        run: |
+          set -euo pipefail
+
+          APP_PATH="build/macos/Build/Products/Release/${{ env.APP_NAME }}.app"
+          test -d "$APP_PATH" || { echo "::error::App bundle not found"; exit 1; }
+
           PKG_ROOT="build/macos/pkg"
-          PKG_NAME="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-macos-unsigned-installer.pkg"
+          PKG_NAME="${{ env.APP_NAME }}-v${{ env.BUILD_NAME }}-build.${{ env.BUILD_NUMBER }}-macos-installer-unsigned.pkg"
           rm -rf "$PKG_ROOT" "$PKG_NAME"
           mkdir -p "$PKG_ROOT"
           cp -R "$APP_PATH" "$PKG_ROOT/"
           pkgbuild \
             --root "$PKG_ROOT" \
             --identifier "${{ env.IDENTIFIER }}" \
-            --version "${{ env.APP_VERSION }}" \
+            --version "${{ env.BUILD_NAME }}" \
             --install-location "/Applications" \
             "$PKG_NAME"
           echo "✅ Successfully Created PKG: $PKG_NAME"
 
-          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
           echo "PKG_NAME=$PKG_NAME" >> "$GITHUB_ENV"
-
       - name: Smoke-test packages
         run: |
           set -euo pipefail
           file "${{ env.DMG_NAME }}"
           pkgutil --check-signature "${{ env.PKG_NAME }}" || true # unsigned is expected
           echo "✅ Packages created"
-
-      - name: Upload installers
+      - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: macos-unsigned-installers-v${{ env.APP_VERSION }}
+          name: ${{ env.PREFIX }}-packages
           path: |
             ${{ env.DMG_NAME }}
             ${{ env.PKG_NAME }}
           retention-days: 30
           if-no-files-found: error
+      - name: Generate build manifest
+        run: |
+          set -euo pipefail
 
-      - name: Clean up .env
-        if: always()
-        run: rm -f .env
+          manifestDir="."
+          mkdir -p "$manifestDir"
+          manifestPath="$manifestDir/macos_build_manifest.json"
+
+          lockfilePath="pubspec.lock"
+          lockHash=""
+          if [ -f "$lockfilePath" ]; then
+            # Compute SHA256 and take first 12 characters
+            lockHash=$(sha256sum "$lockfilePath" | awk '{print substr($1,1,12)}')
+          else
+            lockHash="no-lockfile"
+          fi
+
+          gitCommitSha=$(git rev-parse HEAD)
+          gitBranchName=${{ github.ref_name }}
+          buildTimestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          flutterVersionOutput=$(flutter --version --machine)
+          flutterFwVersion=$(echo "$flutterVersionOutput" | jq -r '.frameworkVersion')
+          flutterChannel=$(echo "$flutterVersionOutput" | jq -r '.channel')
+          flutterVersionStr="Flutter $flutterFwVersion ($flutterChannel)"
+
+          dartVersionStr=$(dart --version 2>&1 | head -n 1)
+
+          candidateArtifacts=(
+            "${{ env.DMG_NAME }}"
+            "${{ env.PKG_NAME }}"
+          )
+
+          python3 -c '
+          import json, os, hashlib, sys
+          manifestPath = sys.argv[-1]
+          dartVersionStr = sys.argv[-2]
+          flutterVersionStr = sys.argv[-3]
+          buildTimestamp = sys.argv[-4]
+          gitBranchName = sys.argv[-5]
+          gitCommitSha = sys.argv[-6]
+          lockHash = sys.argv[-7]
+
+          # Everything between index 1 and the last 7 items represents the candidate files
+          candidates = sys.argv[1:-7]
+          artifacts = {}
+
+          for art in candidates:
+            if art and os.path.exists(art):
+              size = os.path.getsize(art)
+              sha256_hash = hashlib.sha256()
+              with open(art, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                  sha256_hash.update(byte_block)
+              artifacts[art] = {
+                  "type": "file",
+                  "size_bytes": size,
+                  "sha256": sha256_hash.hexdigest()
+              }
+
+          manifest = {
+              "platform": "macos",
+              "architecture": "${{ env.ARCH }}",
+              "app_title": "${{ env.APP_NAME }}",
+              "publisher": "${{ env.APP_PUBLISHER }}",
+              "build_name": "${{ env.BUILD_NAME }}",
+              "build_number": "${{ env.BUILD_NUMBER }}",
+              "identifier": "${{ env.IDENTIFIER }}",
+              "build_flavor": "production",
+              "build_type": "release",
+              "ci_run_id": "${{ github.run_id }}",
+              "dependency_lock_hash": lockHash,
+              "git_sha": gitCommitSha,
+              "git_branch": gitBranchName,
+              "build_timestamp": buildTimestamp,
+              "flutter_version": flutterVersionStr,
+              "dart_version": dartVersionStr,
+              "artifacts": artifacts
+          }
+
+          with open(manifestPath, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+          ' "${candidateArtifacts[@]}" "$lockHash" "$gitCommitSha" "$gitBranchName" "$buildTimestamp" "$flutterVersionStr" "$dartVersionStr" "$manifestPath"
+
+          echo "✅ Build manifest generated at $manifestPath"
+      - name: Upload macos build manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PREFIX }}-manifest
+          path: macos_build_manifest.json
+          retention-days: 30
+          if-no-files-found: error

@@ -1,335 +1,1152 @@
-# This file contains the fastlane.tools configuration
-# You can find the documentation at https://docs.fastlane.tools
+# fastlane/Fastfile
 #
-# For a list of all available actions, check out
-#
-#     https://docs.fastlane.tools/actions
-#
-# For a list of all available plugins, check out
-#
-#     https://docs.fastlane.tools/plugins/available-plugins
-#
+# =============================================================================
+# Fastlane Configuration — Flutter Android (Hardened Production Release v4)
+# =============================================================================
 
-# Uncomment the line if you want fastlane to automatically update itself
-# update_fastlane
+require "json"
+require "fileutils"
+require "digest"
+require "time"
+require "shellwords"
+require "socket"
+require "pathname"
 
 default_platform(:android)
 
 platform :android do
-  # Constants and configuration
-  SERVICE_ACCOUNT_PATH = "../flutter-ci-432e4-b2e456c83eaa.json"
-  ANDROID_APK_PATH = "../../build/app/outputs/flutter-apk/app-release.apk".freeze
-  ANDROID_AAB_PATH = "../../build/app/outputs/bundle/release/app-release.aab".freeze
 
-  # Build configuration
-  BUILD_NAME = ENV["BUILD_NAME"] || "0.1.0"
-  BUILD_NUMBER = ENV["BUILD_NUMBER"] || "1"
+  # ===========================================================================
+  # Dynamic Environment Accessors (Nil-Safe)
+  # ===========================================================================
 
-  # Notification Configuration
-  # SLACK_URL = ENV['SLACK_WEBHOOK_URL']
-  # DISCORD_URL = ENV['DISCORD_WEBHOOK_URL']
-  # TEAMS_URL = ENV['TEAMS_WEBHOOK_URL']
-
-  # Git Configuration
-  # GIT_BRANCH = git_branch
-  # GIT_COMMIT = last_git_commit[:commit_hash]
-  # GIT_AUTHOR = last_git_commit[:author]
-
-  before_all do
-    # TODO: Some logic
+  def service_account_path
+    ENV["GOOGLE_APPLICATION_CREDENTIALS"].to_s.strip
   end
 
-  private_lane :clean_builds do
-    UI.message("Cleaning builds...")
-    sh "flutter clean"
-    sh "flutter pub get"
+  def build_name
+    ENV["BUILD_NAME"].to_s.strip
   end
 
-  private_lane :scan_for_secrets do
-    # git-secrets is used to detect secrets
-    sh "git secrets --scan"
-    UI.message("No secrets detected in code")
-  rescue => e
-    UI.user_error!("Secrets detected in code: #{e.message}")
+  def build_number
+    ENV["BUILD_NUMBER"].to_s.strip
   end
 
-  private_lane :audit_dependencies do
-    UI.message("Auditing Flutter dependencies...")
-
-    # Check unknown vulnerabilities
-    sh "flutter pub deps --style=compact"
+  def package_name
+    (ENV["ANDROID_PACKAGE_NAME"]).to_s.strip
   end
 
-  private_lane :check_dependencies do
-    UI.message("Checking dependencies...")
+  def firebase_android_app_id
+    ENV["FIREBASE_ANDROID_APP_ID"].to_s.strip
+  end
 
-    sh "flutter pub get"
+  def firebase_testers
+    ENV["FIREBASE_TESTERS"].to_s.strip
+  end
 
-    # Verify dependency integrity
-    sh "flutter analyze --fatal-infos"
+  def api_base_url(required: true)
+    url = ENV["API_BASE_URL"].to_s.strip
+    if url.empty? && required
+      UI.user_error!("API_BASE_URL environment variable is required.")
+    end
+    url
+  end
 
-    UI.message("Dependency status checked")
+  def artifact_flavor
+    flavor = ENV.fetch("ARTIFACT_FLAVOR", "release").downcase.strip
+    unless flavor.match?(/\A[0-9a-z._-]+\z/)
+      UI.user_error!("ARTIFACT_FLAVOR contains invalid characters. Allowed: alphanumeric, '.', '_', '-'")
+    end
+    flavor
+  end
+
+  # Metadata & Output Paths
+  DEBUG_INFO_DIRECTORY = ENV.fetch("DEBUG_INFO_DIRECTORY", "symbols/android").freeze
+  PROJECT_ROOT = begin
+    dir = __dir__
+    while dir != "/" && !File.exist?(File.join(dir, "pubspec.yaml"))
+      dir = File.expand_path("..", dir)
+    end
+    dir
+  end.freeze
+
+  BUILD_MANIFEST_FILE = ENV.fetch("ANDROID_BUILD_MANIFEST", File.join(PROJECT_ROOT, "android_build_manifest.json")).freeze
+  ANDROID_APK_PATH = ENV.fetch("ANDROID_APK_PATH", File.join(PROJECT_ROOT, "build/app/outputs/flutter-apk/app-release.apk")).freeze
+  ANDROID_AAB_PATH = ENV.fetch("ANDROID_AAB_PATH", File.join(PROJECT_ROOT, "build/app/outputs/bundle/release/app-release.aab")).freeze
+  FIREBASE_GROUPS     = ENV.fetch("FIREBASE_GROUPS", "qa-team").freeze
+  METADATA_DIRECTORY  = ENV.fetch("FASTLANE_METADATA_PATH", "fastlane/metadata/android").freeze
+  INTEGRATION_TEST_DIRECTORY = ENV.fetch("INTEGRATION_TEST_DIRECTORY", "integration_test").freeze
+
+  # Naming Options
+  APP_NAME = ENV.fetch("APP_NAME", "runner").downcase.gsub(/[^a-z0-9]+/, "-").sub(/\A-+/, "").sub(/-+\z/, "").freeze
+
+  # ===========================================================================
+  # Environment & System Helpers
+  # ===========================================================================
+
+  private_lane :flutter_version_info do
+    @flutter_version ||= begin
+      output = sh("flutter --version --machine")
+      parsed = JSON.parse(output)
+      "Flutter #{parsed['frameworkVersion']} (#{parsed['channel']})"
+    rescue => e
+      UI.important("Could not parse Flutter machine version output: #{e.message}")
+      "Flutter Unknown"
+    end
+  end
+
+  private_lane :dart_version_info do
+    @dart_version ||= begin
+      sh("dart --version 2>&1").lines.first.to_s.strip
+    rescue
+      "Dart Unknown"
+    end
+  end
+
+  private_lane :require_command do |options|
+    command = options.fetch(:command)
+    unless system("command -v #{command.to_s.shellescape} > /dev/null 2>&1")
+      UI.user_error!("Required command was not found: #{command}")
+    end
+  end
+
+  private_lane :require_file do |options|
+    path = options.fetch(:path).to_s.strip
+    name = options.fetch(:name, path)
+
+    if path.empty? || !File.exist?(path)
+      UI.user_error!("#{name} not found or path is empty: '#{path}'")
+    end
+  end
+
+  private_lane :require_directory do |options|
+    path = options.fetch(:path).to_s.strip
+    name = options.fetch(:name, path)
+
+    if path.empty? || !Dir.exist?(path)
+      UI.user_error!("#{name} directory not found or path is empty: '#{path}'")
+    end
+  end
+
+  private_lane :git_commit_sha do
+    sh("git rev-parse HEAD").strip
+  rescue
+    "unknown"
+  end
+
+  private_lane :git_branch_name do
+    sh("git rev-parse --abbrev-ref HEAD").strip
+  rescue
+    "unknown"
+  end
+
+  private_lane :dart_define_args do |options|
+    pipeline_id = ENV["GITHUB_RUN_ID"] || ENV["CI_PIPELINE_ID"] || "local-#{Time.now.to_i}"
+    build_host  = ENV["RUNNER_NAME"] || (Socket.gethostname rescue "local-machine")
+
+    flavor     = options[:flavor] || ENV.fetch("BUILD_FLAVOR", "production")
+    build_type = options[:build_type] || ENV.fetch("BUILD_TYPE", "release")
+
+    lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
+    lock_hash = File.exist?(lockfile_path) ? Digest::SHA256.file(lockfile_path).hexdigest[0..11] : "no-lockfile"
+
+    defines = {
+      "ANDROID_PACKAGE_NAME" => package_name,
+      "BUILD_NAME"           => build_name,
+      "BUILD_NUMBER"         => build_number,
+      "BUILD_FLAVOR"         => flavor,
+      "BUILD_TYPE"           => build_type,
+      "CI_PIPELINE_ID"       => pipeline_id,
+      "BUILD_HOST"           => build_host,
+      "OS_TARGET"             => ENV.fetch("OS_TARGET", "android-arm64"),
+      "COMPILER_VERSION"     => "#{flutter_version_info}, #{dart_version_info}",
+      "DEPENDENCY_LOCK_HASH" => lock_hash,
+      "SIGNING_CERTIFICATE"  => ENV.fetch("SIGNING_CERTIFICATE", "Android Keystore/SHA256"),
+      "DEVICE_COMPATIBILITY" => ENV.fetch("DEVICE_COMPATIBILITY", "Android 7.0+ (API 24)"),
+      "API_BASE_URL"         => api_base_url(required: false),
+      "GIT_SHA"              => git_commit_sha,
+      "GIT_BRANCH"           => git_branch_name,
+      "BUILD_TIMESTAMP"      => Time.now.utc.iso8601
+    }
+
+    defines.map { |k, v| "--dart-define=#{k}=#{v}" }
+  end
+
+  private_lane :prepare_fastlane_directories do
+    [
+      File.dirname(BUILD_MANIFEST_FILE),
+    ].each do |directory|
+      FileUtils.mkdir_p(directory)
+    end
+  end
+
+  # ===========================================================================
+  # Artifact Naming & Management
+  # ===========================================================================
+
+  private_lane :artifact_filename do |options|
+    extension = options.fetch(:extension)
+    platform  = options.fetch(:platform)
+    flavor    = options[:flavor]
+    signed    = options.fetch(:signed, false)
+
+    signed_status = signed ? "signed" : "unsigned"
+
+    parts = [
+      APP_NAME,
+      "v#{build_name}-build.#{build_number}",
+      platform
+    ]
+
+    parts << flavor unless flavor.to_s.strip.empty?
+    parts << signed_status
+
+    "#{parts.join("-")}.#{extension}"
+  end
+
+  private_lane :copy_artifact do |options|
+    source      = options.fetch(:source)
+    destination = options.fetch(:destination)
+
+    require_file(path: source, name: "Artifact")
+
+    if File.exist?(destination)
+      UI.important("Overwriting existing artifact destination: #{destination}")
+    end
+
+    FileUtils.mkdir_p(File.dirname(destination))
+    FileUtils.cp(source, destination)
+
+    UI.success("Named artifact created: #{destination}")
+  end
+
+  # ===========================================================================
+  # Environment Validation
+  # ===========================================================================
+
+  private_lane :validate_environment do
+    UI.message("Validating system environment...")
+
+    %w[flutter dart git curl].each do |command|
+      require_command(command: command)
+    end
+
+    UI.success("Environment validation passed.")
+  end
+
+  private_lane :validate_build_version do
+    UI.message("Validating build version...")
+
+    if build_name.empty?
+      UI.user_error!("BUILD_NAME environment variable is required.")
+    end
+
+    unless build_name.match?(/\A[0-9A-Za-z._-]+\z/)
+      UI.user_error!("BUILD_NAME contains invalid characters. Allowed characters are alphanumeric, '.', '_', and '-'.")
+    end
+
+    if build_number.empty?
+      UI.user_error!("BUILD_NUMBER environment variable is required.")
+    end
+
+    unless build_number.match?(/\A\d+\z/)
+      UI.user_error!("BUILD_NUMBER must contain only digits.")
+    end
+
+    UI.message("Build version: #{build_name} (#{build_number})")
+  end
+
+  private_lane :validate_service_account do
+    UI.message("Validating Google service account...")
+
+    if service_account_path.empty?
+      UI.user_error!("GOOGLE_APPLICATION_CREDENTIALS environment variable is required.")
+    end
+
+    require_file(path: service_account_path, name: "Google service account file")
+
+    begin
+      service_account = JSON.parse(File.read(service_account_path))
+    rescue JSON::ParserError => e
+      UI.user_error!("Invalid service account JSON: #{e.message}")
+    end
+
+    required_fields = %w[
+      type project_id private_key_id private_key
+      client_email client_id auth_uri token_uri
+    ]
+
+    missing_fields = required_fields.select do |field|
+      service_account[field].to_s.strip.empty?
+    end
+
+    unless missing_fields.empty?
+      UI.user_error!("Missing service account fields: #{missing_fields.join(', ')}")
+    end
+
+    unless service_account["type"] == "service_account"
+      UI.user_error!("Invalid service account type: #{service_account['type']}")
+    end
+
+    UI.success("Google service account validation passed.")
+  end
+
+  private_lane :validate_release_services do
+    UI.message("Validating release services connectivity...")
+    require_command(command: "curl")
+
+    services = {
+      "Google OAuth"               => "https://oauth2.googleapis.com/token",
+      "Google Play API"            => "https://androidpublisher.googleapis.com/",
+      "Firebase App Distribution"  => "https://firebaseappdistribution.googleapis.com/"
+    }
+
+    services.each do |name, url|
+      UI.message("Checking #{name}...")
+
+      status_output = sh("curl --silent --location --connect-timeout 10 --max-time 20 --output /dev/null --write-out '%{http_code}' #{url.shellescape}").strip
+      status_code   = status_output.to_i
+
+      if status_code <= 0 || status_code >= 500
+        UI.user_error!("Unable to reach #{name} (HTTP status: #{status_code})")
+      end
+    end
+
+    UI.success("Release services validation passed.")
+  end
+
+  private_lane :validate_disk_space do
+    minimum_mb = ENV.fetch("MINIMUM_DISK_SPACE_MB", "4096").to_i
+    available_kb = sh("df -Pk . | awk 'NR==2 {print $4}'").strip.to_i
+    available_mb = available_kb / 1024
+
+    UI.message("Available disk space: #{available_mb} MB")
+
+    if available_mb < minimum_mb
+      UI.user_error!("Insufficient disk space. Required: #{minimum_mb} MB, available: #{available_mb} MB")
+    end
+
+    UI.success("Disk space validation passed.")
+  end
+
+  # ===========================================================================
+  # Artifact Validation Helpers
+  # ===========================================================================
+
+  private_lane :validate_artifact do |options|
+    path = options.fetch(:path)
+    name = options.fetch(:name)
+
+    require_file(path: path, name: name)
+
+    if File.size(path).zero?
+      UI.user_error!("#{name} is empty: #{path}")
+    end
+
+    UI.success("#{name} validated successfully.")
+  end
+
+  private_lane :validate_apk_artifact do
+    validate_artifact(path: ANDROID_APK_PATH, name: "Android APK")
+  end
+
+  private_lane :validate_aab_artifact do
+    validate_artifact(path: ANDROID_AAB_PATH, name: "Android App Bundle")
+  end
+
+  # ===========================================================================
+  # Quality & Static Verification
+  # ===========================================================================
+
+  private_lane :install_dependencies do
+    UI.message("Installing Flutter dependencies...")
+    sh("flutter pub get")
+  end
+
+  private_lane :check_formatting do
+    UI.message("Checking Dart formatting...")
+    sh("dart format --output=none --set-exit-if-changed .")
+    UI.success("Formatting validation passed.")
   end
 
   private_lane :run_code_analysis do
-    UI.message("Running code analysis...")
+    UI.message("Running Flutter analysis...")
+    sh("flutter analyze")
+    UI.success("Static analysis passed.")
+  end
 
-    sh "flutter analyze"
+  private_lane :test_unit do
+    test_path = ENV.fetch("TEST_UNIT_PATH", "test/unit")
+    test_path = "test" unless Dir.exist?(test_path)
+    UI.message("Running unit tests at #{test_path}...")
+    sh("flutter test #{test_path.shellescape}")
+    UI.success("Unit tests passed.")
+  end
 
-    sh "dart analyze --fatal-infos ."
+  private_lane :test_widget do
+    test_path = ENV.fetch("TEST_WIDGET_PATH", "test/widget")
+    test_path = "test" unless Dir.exist?(test_path)
+    UI.message("Running widget tests at #{test_path}...")
+    sh("flutter test #{test_path.shellescape}")
+    UI.success("Widget tests passed.")
+  end
 
-    UI.message("Code analysis passed")
+  private_lane :test_integration do
+    if !Dir.exist?(INTEGRATION_TEST_DIRECTORY)
+      UI.message("No integration test directory found; skipping.")
+    elsif Dir.glob("#{INTEGRATION_TEST_DIRECTORY}/**/*_test.dart").empty?
+      UI.message("No integration test files found; skipping.")
+    else
+      UI.message("Running integration tests...")
+      sh("flutter test #{INTEGRATION_TEST_DIRECTORY.shellescape}")
+      UI.success("Integration tests passed.")
+    end
+  end
+
+  private_lane :test_all do
+    test_unit
+    test_widget
+    test_integration
   end
 
   private_lane :run_tests_with_coverage do
     UI.message("Running tests with coverage...")
-    sh "flutter test --coverage"
+    sh("flutter test --coverage")
 
-    UI.message("Tests passed")
+    unless File.exist?("coverage/lcov.info")
+      UI.user_error!("Coverage file was not generated.")
+    end
+
+    UI.success("Coverage report generated successfully.")
   end
 
-  private_lane :flutter_test do
+  private_lane :run_android_lint do
+    UI.message("Running Android lint...")
+    require_command(command: "java")
+    Dir.chdir("android") do
+      sh("./gradlew lintRelease")
+    end
+    UI.success("Android lint passed.")
+  end
+
+  # ===========================================================================
+  # Build Manifest
+  # ===========================================================================
+
+  private_lane :generate_build_manifest do |options|
+    prepare_fastlane_directories
+    artifacts = {}
+
+    [ANDROID_APK_PATH, ANDROID_AAB_PATH].each do |path|
+      next unless File.exist?(path)
+
+       # Convert absolute path to a clean relative path from PROJECT_ROOT
+      rel_path = Pathname.new(path).relative_path_from(Pathname.new(PROJECT_ROOT)).to_s
+
+      if File.file?(path)
+        artifacts[rel_path] = {
+          "type"       => "file",
+          "size_bytes" => File.size(path),
+          "sha256"     => Digest::SHA256.file(path).hexdigest
+        }
+      else
+        files = Dir.glob(File.join(path, "**", "*")).select { |item| File.file?(item) }
+        artifacts[rel_path] = {
+          "type"       => "directory",
+          "file_count" => files.length,
+          "size_bytes" => files.map { |file| File.size(file) }.reduce(0, :+)
+        }
+      end
+    end
+
+    if artifacts.empty?
+      UI.user_error!("No build artifacts found.")
+    end
+
+    lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
+
+    manifest = {
+      "platform"             => "ios",
+      "build_name"           => build_name,
+      "build_number"         => build_number,
+      "bundle_identifier"    => app_identifier,
+      "build_flavor"         => options[:flavor] || ENV.fetch("BUILD_FLAVOR", "dev"),
+      "build_type"           => options[:build_type] || ENV.fetch("BUILD_TYPE", "release"),
+      "dependency_lock_hash" => File.exist?(lockfile_path) ? Digest::SHA256.file(lockfile_path).hexdigest[0..11] : "no-lockfile",
+      "os_target"            => ENV.fetch("OS_TARGET", "ios-arm64"),
+      "signing_certificate"  => ENV.fetch("SIGNING_CERTIFICATE", "Apple Development/Automatic"),
+      "device_compatibility" => ENV.fetch("DEVICE_COMPATIBILITY", "iOS 14.0+"),
+      "git_sha"              => git_commit_sha,
+      "git_branch"           => git_branch_name,
+      "build_timestamp"      => Time.now.utc.iso8601,
+      "flutter_version"      => flutter_version_info,
+      "xcode_version"        => xcode_version_info,
+      "artifacts"            => artifacts
+    }
+
+    # Optional API URL backported from Android pattern
+    base_url = api_base_url
+    manifest["api_base_url"] = base_url unless base_url.empty?
+
+    File.write(BUILD_MANIFEST_FILE, JSON.pretty_generate(manifest) + "\n")
+    UI.success("Build manifest generated: #{BUILD_MANIFEST_FILE}")
+  end
+
+  # ===========================================================================
+  # Build Lanes
+  # ===========================================================================
+
+  private_lane :clean_builds do
+    UI.message("Cleaning Flutter build...")
+    sh("flutter clean")
+  end
+
+  private_lane :build_release_apk do
+    args = [
+      "flutter", "build", "apk",
+      "--release",
+      "--obfuscate",
+      "--split-debug-info=#{DEBUG_INFO_DIRECTORY}",
+      "--build-name=#{build_name}",
+      "--build-number=#{build_number}"
+    ] + dart_define_args
+
+    sh(*args)
+    validate_apk_artifact
+
+    named_apk = File.join(
+      File.dirname(ANDROID_APK_PATH),
+      artifact_filename(
+        extension: "apk",
+        platform: "android",
+        flavor: artifact_flavor,
+        signed: true
+      )
+    )
+
+    copy_artifact(source: ANDROID_APK_PATH, destination: named_apk)
+  end
+
+  private_lane :build_release_aab do
+    args = [
+      "flutter", "build", "appbundle",
+      "--release",
+      "--obfuscate",
+      "--split-debug-info=#{DEBUG_INFO_DIRECTORY}",
+      "--build-name=#{build_name}",
+      "--build-number=#{build_number}"
+    ] + dart_define_args
+
+    sh(*args)
+    validate_aab_artifact
+
+    named_aab = File.join(
+      File.dirname(ANDROID_AAB_PATH),
+      artifact_filename(
+        extension: "aab",
+        platform: "android",
+        flavor: artifact_flavor,
+        signed: true
+      )
+    )
+
+    copy_artifact(source: ANDROID_AAB_PATH, destination: named_aab)
+  end
+
+  # ===========================================================================
+  # Artifact Inspection & Debug Symbols
+  # ===========================================================================
+
+  private_lane :validate_android_artifact_metadata do |options|
+    artifact_type = options.fetch(:artifact_type, "aab")
+
+    case artifact_type
+    when "apk"
+      validate_apk_artifact
+
+      aapt_cmd = if system("command -v aapt2 > /dev/null 2>&1")
+                   "aapt2"
+                 elsif system("command -v aapt > /dev/null 2>&1")
+                   "aapt"
+                 else
+                   UI.user_error!("Neither 'aapt2' nor 'aapt' command was found.")
+                 end
+
+      output = sh("#{aapt_cmd} dump badging #{ANDROID_APK_PATH.shellescape}")
+
+      package_match      = output.match(/package:\s+name='([^']+)'/)
+      version_name_match = output.match(/versionName='([^']+)'/)
+      version_code_match = output.match(/versionCode='([^']+)'/)
+
+      unless package_match && version_name_match && version_code_match
+        UI.user_error!("Unable to read APK metadata.")
+      end
+
+      if !package_name.empty? && package_match[1] != package_name
+        UI.user_error!("APK package name mismatch.")
+      end
+
+      if version_name_match[1] != build_name
+        UI.user_error!("APK version name mismatch.")
+      end
+
+      if version_code_match[1] != build_number
+        UI.user_error!("APK version code mismatch.")
+      end
+
+    when "aab"
+      validate_aab_artifact
+      bundletool_path = ENV["BUNDLETOOL_PATH"].to_s.strip
+
+      if bundletool_path.empty?
+        UI.message("BUNDLETOOL_PATH not configured; skipping AAB bundletool validation.")
+      else
+        require_command(command: "java")
+        require_file(path: bundletool_path, name: "bundletool binary")
+        sh("java -jar #{bundletool_path.shellescape} validate --bundle=#{ANDROID_AAB_PATH.shellescape}")
+      end
+
+    else
+      UI.user_error!("Unsupported artifact type: #{artifact_type}")
+    end
+
+    UI.success("Artifact metadata validation passed.")
+  end
+
+  private_lane :validate_android_signing do |options|
+    artifact_type = options.fetch(:artifact_type, "aab")
+
+    case artifact_type
+    when "apk"
+      validate_apk_artifact
+      require_command(command: "apksigner")
+      sh("apksigner verify --verbose --print-certs #{ANDROID_APK_PATH.shellescape}")
+      UI.success("APK signing validation passed.")
+
+    when "aab"
+      validate_aab_artifact
+      UI.success("Signing validation skipped for AAB (handled automatically by Google Play App Signing upon upload).")
+
+    else
+      UI.user_error!("Unsupported artifact type: #{artifact_type}")
+    end
+  end
+
+  private_lane :validate_debug_symbols do
+    require_directory(path: DEBUG_INFO_DIRECTORY, name: "Debug symbol")
+
+    symbols = Dir.glob("#{DEBUG_INFO_DIRECTORY}/**/*").select { |path| File.file?(path) }
+
+    if symbols.empty?
+      UI.user_error!("No debug symbols found in #{DEBUG_INFO_DIRECTORY}.")
+    end
+
+    UI.success("Debug symbols validated.")
+  end
+
+  private_lane :upload_crashlytics_symbols do
+    validate_debug_symbols
+    command = ENV["FIREBASE_CRASHLYTICS_SYMBOLS_COMMAND"].to_s.strip
+
+    if command.empty?
+      UI.message("Crashlytics symbol command not configured; skipping.")
+      next
+    end
+
+    sh(
+      {
+        "FIREBASE_ANDROID_APP_ID" => firebase_android_app_id,
+        "CRASHLYTICS_SYMBOLS_DIRECTORY" => DEBUG_INFO_DIRECTORY
+      },
+      command
+    )
+  end
+
+  # ===========================================================================
+  # Store Validation
+  # ===========================================================================
+
+  private_lane :validate_store_metadata do
+    require_directory(path: METADATA_DIRECTORY, name: "Metadata")
+
+    locale_directories = Dir.glob("#{METADATA_DIRECTORY}/*").select { |path| File.directory?(path) }
+
+    if locale_directories.empty?
+      UI.user_error!("No metadata locales found under #{METADATA_DIRECTORY}.")
+    end
+
+    locale_directories.each do |locale_directory|
+      locale = File.basename(locale_directory)
+      required_files = %w[title.txt short_description.txt full_description.txt]
+
+      file_contents = required_files.to_h do |file_name|
+        path = File.join(locale_directory, file_name)
+
+        unless File.exist?(path)
+          UI.user_error!("Missing metadata file for #{locale}: #{path}")
+        end
+
+        content = File.read(path).strip
+        if content.empty?
+          UI.user_error!("Empty metadata file for #{locale}: #{path}")
+        end
+
+        [file_name, content]
+      end
+
+      title             = file_contents["title.txt"]
+      short_description = file_contents["short_description.txt"]
+      full_description  = file_contents["full_description.txt"]
+
+      if title.length > 30
+        UI.user_error!("Title exceeds 30 characters for locale: #{locale}")
+      end
+
+      if short_description.length > 80
+        UI.user_error!("Short description exceeds 80 characters for locale: #{locale}")
+      end
+
+      if full_description.length > 4000
+        UI.user_error!("Full description exceeds 4000 characters for locale: #{locale}")
+      end
+    end
+
+    UI.success("Store metadata validation passed.")
+  end
+
+  private_lane :validate_store_screenshots do
+    image_extensions = %w[.png .jpg .jpeg]
+
+    screenshot_files = Dir.glob("#{METADATA_DIRECTORY}/**/*").select do |path|
+      File.file?(path) && image_extensions.include?(File.extname(path).downcase)
+    end
+
+    if screenshot_files.empty?
+      UI.user_error!("No store screenshots found under #{METADATA_DIRECTORY}.")
+    end
+
+    screenshot_files.each do |path|
+      if File.size(path).zero?
+        UI.user_error!("Empty store image file detected: #{path}")
+      end
+    end
+
+    UI.success("Store screenshots validation passed.")
+  end
+
+  # ===========================================================================
+  # Publishing Helpers (Pure Distribution — Consumes Pre-built Artifacts)
+  # ===========================================================================
+
+  private_lane :validate_play_release do |options|
+    track = options.fetch(:track)
+    allowed_tracks = %w[internal closed open production]
+
+    unless allowed_tracks.include?(track)
+      UI.user_error!("Unsupported Google Play track: #{track}")
+    end
+
+    validate_aab_artifact
+    validate_android_artifact_metadata(artifact_type: "aab")
+    validate_android_signing(artifact_type: "aab")
+
+    UI.success("Google Play release validation passed.")
+  end
+
+  private_lane :read_release_notes do
+    release_notes_path = ENV.fetch("RELEASE_NOTES_FILE", "release_notes.txt")
+    notes = "Bug fixes and improvements."
+
+    if File.exist?(release_notes_path)
+      file_notes = File.read(release_notes_path).strip
+      notes = file_notes unless file_notes.empty?
+    end
+
+    if notes.length > 500
+      UI.important("Release notes exceed 500 character limit (#{notes.length} chars); truncating for Google Play compliance.")
+      notes = notes[0..496] + "..."
+    end
+
+    notes
+  end
+
+  private_lane :distribute_firebase do
+    if firebase_android_app_id.empty?
+      UI.user_error!("FIREBASE_ANDROID_APP_ID is required for Firebase App Distribution.")
+    end
+
+    validate_aab_artifact
+
+    groups = FIREBASE_GROUPS.to_s.strip
+    testers = firebase_testers.to_s.strip
+
+    if groups.empty? && testers.empty?
+      UI.user_error!("At least one tester group or individual tester email must be configured for Firebase App Distribution.")
+    end
+
+    parameters = {
+      app: firebase_android_app_id,
+      service_credentials_file: service_account_path,
+      android_artifact_type: "AAB",
+      android_artifact_path: ANDROID_AAB_PATH,
+      release_notes: read_release_notes
+    }
+
+    parameters[:groups] = groups unless groups.empty?
+    parameters[:testers] = testers unless testers.empty?
+
+    firebase_app_distribution(**parameters)
+    UI.success("Existing AAB published to Firebase App Distribution.")
+  end
+
+  private_lane :upload_play_store_release do |options|
+    track          = options.fetch(:track)
+    release_status = options.fetch(:release_status, "completed")
+
+    allowed_statuses = %w[draft completed halted inProgress]
+    unless allowed_statuses.include?(release_status)
+      UI.user_error!("Invalid release_status '#{release_status}'. Must be one of: #{allowed_statuses.join(', ')}")
+    end
+
+    validate_play_release(track: track)
+    timeout_sec = ENV.fetch("PLAY_STORE_UPLOAD_TIMEOUT", "300").to_i
+
+    upload_to_play_store(
+      track: track,
+      aab: ANDROID_AAB_PATH,
+      release_status: release_status,
+      json_key: service_account_path,
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      timeout: timeout_sec
+    )
+
+    UI.success("Existing AAB uploaded to Google Play track: #{track}.")
+  end
+
+  private_lane :promote_release do |options|
+    from_track = options.fetch(:from_track)
+    to_track   = options.fetch(:to_track)
+
+    codes = google_play_track_version_codes(
+      package_name: package_name,
+      track: from_track,
+      json_key: service_account_path
+    ) rescue []
+
+    if codes.empty?
+      UI.user_error!("No active releases or version codes found on track '#{from_track}' to promote.")
+    end
+
+    upload_to_play_store(
+      track: from_track,
+      track_promote_to: to_track,
+      json_key: service_account_path,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+
+    UI.success("Promoted release from #{from_track} to #{to_track}.")
+  end
+
+  # ===========================================================================
+  # Public Lanes — Quality
+  # ===========================================================================
+
+  desc "Check Dart formatting"
+  lane :format do
+    validate_environment
+    install_dependencies
+    check_formatting
+  end
+
+  desc "Run Flutter analysis"
+  lane :analyze do
+    validate_environment
+    install_dependencies
+    run_code_analysis
+  end
+
+  desc "Run unit tests"
+  lane :unit_tests do
+    validate_environment
+    install_dependencies
+    test_unit
+  end
+
+  desc "Run widget tests"
+  lane :widget_tests do
+    validate_environment
+    install_dependencies
+    test_widget
+  end
+
+  desc "Run integration tests"
+  lane :integration_tests do
+    validate_environment
+    install_dependencies
+    test_integration
+  end
+
+  desc "Run all tests"
+  lane :all_tests do
+    validate_environment
+    install_dependencies
+    test_all
+  end
+
+  desc "Generate test coverage"
+  lane :coverage do
+    validate_environment
+    install_dependencies
     run_tests_with_coverage
   end
 
-  private_lane :build_apk do
-    sh "flutter build apk " \
-      "--obfuscate " \
-      "--split-debug-info=android/debug-info " \
-      "--dart-define-from-file=.env " \
-      "--build-name=#{BUILD_NAME} " \
-      "--build-number=#{BUILD_NUMBER}"
-
-    UI.success("✅ APK built successfully at #{ANDROID_APK_PATH}")
+  desc "Run Android lint"
+  lane :android_lint do
+    validate_environment
+    install_dependencies
+    run_android_lint
   end
 
-  private_lane :build_aab do
-    sh "flutter build appbundle" \
-    "--release " \
-    "--obfuscate " \
-    "--split-debug-info=android/debug-info" \
-    "--dart-define-from-file=.env" \
-    "--build-name=#{BUILD_NAME}" \
-    "--build-number=#{BUILD_NUMBER}"
-
-    UI.success("✅ AAB built successfully at #{ANDROID_AAB_PATH}")
-  end
-
-  def validate_aab!
-    UI.message("Current working directory #{Dir.pwd}")
-    UI.message("Validating AAB at #{ANDROID_AAB_PATH}")
-    unless File.exist?(ANDROID_AAB_PATH)
-      UI.user_error!("AAB not found at #{ANDROID_AAB_PATH}. Did the build fail?")
-    end
-  end
-
-  private_lane :upload_play_store do |options|
-    upload_to_play_store(
-      track: options[:track],
-      aab: ANDROID_AAB_PATH,
-      release_status: "completed",
-      json_key: SERVICE_ACCOUNT_PATH,
-      skip_upload_aab: false,
-      skip_upload_apk: true,
-      skip_upload_metadata: false, # Set to false to upload metadata
-      skip_upload_images: false, # Set to false to upload images
-      skip_upload_screenshots: false, # Set to false to upload screenshots
-      timeout: 300
-    )
-  end
-
-  desc "Runs all the tests"
+  desc "Run complete quality verification"
   lane :test do
-    flutter_test
+    validate_environment
+    install_dependencies
+    check_formatting
+    run_code_analysis
+    test_all
+    run_tests_with_coverage
+    run_android_lint
   end
 
-  desc "Build Android APK and AAB"
-  lane :build_android_app do
+  # ===========================================================================
+  # Public Lanes — BUILD LANES (Generates Artifacts & Manifest)
+  # ===========================================================================
+
+  desc "Build release APK"
+  lane :build_android_apk do |options|
+    validate_environment
+    validate_build_version
+    validate_disk_space
+
     clean_builds
-    # build_apk
-    build_aab
+    install_dependencies
+    check_formatting
+    run_code_analysis
+
+    build_release_apk
+    generate_build_manifest(options)
   end
 
-  desc "Only upload Play Store metadata"
+  desc "Build release AAB"
+  lane :build_android_app do |options|
+    validate_environment
+    validate_build_version
+    validate_disk_space
+
+    clean_builds
+    install_dependencies
+    check_formatting
+    run_code_analysis
+
+    build_release_aab
+    generate_build_manifest(options)
+  end
+
+  desc "Build APK and AAB"
+  lane :build_all_android_artifacts do |options|
+    validate_environment
+    validate_build_version
+    validate_disk_space
+
+    clean_builds
+    install_dependencies
+    check_formatting
+    run_code_analysis
+
+    build_release_apk
+    build_release_aab
+
+    generate_build_manifest(options)
+
+    UI.success("All Android build artifacts generated successfully.")
+  end
+
+  # ===========================================================================
+  # Public Lanes — Artifact Validation & Manifest Helpers
+  # ===========================================================================
+
+  desc "Generate build manifest for existing Android artifacts"
+  lane :build_manifest do |options|
+    generate_build_manifest(options)
+  end
+
+  desc "Validate release APK"
+  lane :validate_apk do
+    validate_apk_artifact
+    validate_android_artifact_metadata(artifact_type: "apk")
+    validate_android_signing(artifact_type: "apk")
+  end
+
+  desc "Validate release AAB"
+  lane :validate_aab do
+    validate_aab_artifact
+    validate_android_artifact_metadata(artifact_type: "aab")
+    validate_android_signing(artifact_type: "aab")
+  end
+
+  desc "Upload Crashlytics symbols"
+  lane :crashlytics_symbols do
+    upload_crashlytics_symbols
+  end
+
+  # ===========================================================================
+  # Public Lanes — Store Metadata
+  # ===========================================================================
+
+  desc "Validate Google Play metadata"
+  lane :validate_metadata do
+    validate_store_metadata
+  end
+
+  desc "Validate Google Play screenshots"
+  lane :validate_screenshots do
+    validate_store_screenshots
+  end
+
+  desc "Upload metadata and screenshots"
   lane :upload_metadata do
+    validate_service_account
+    validate_store_metadata
+    validate_store_screenshots
+
     upload_to_play_store(
-      json_key: SERVICE_ACCOUNT_PATH,
+      json_key: service_account_path,
       skip_upload_apk: true,
       skip_upload_aab: true,
-      skip_upload_metadata: false, # Set to false to upload metadata
-      skip_upload_images: false, # Set to false to upload images
-      skip_upload_screenshots: false # Set to false to upload screenshots
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false
     )
   end
 
-  desc "Distribute app to Firebase App Distribution"
-  lane :distribute do
-    # https://console.firebase.google.com/u/0/project/flutter-app1-d3af8/settings/integrations/playlink
-    # https://firebase.google.com/docs/app-distribution/android/distribute-fastlane?apptype=aab#before_you_begin
-    # https://play.google.com/console/u/0/developers/8193017614701971889/app-list
-    # https://console.firebase.google.com/u/0/project/flutter-app1-d3af8/appdistribution/app/android:dev.soufianes.flutterci/releases
-    build_android_app
-    validate_aab!
+  # ===========================================================================
+  # Public Lanes — PUBLISH LANES (Consumes Artifacts Only — NEVER Builds)
+  # ===========================================================================
 
-    # Prepare release notes
-    release_notes = begin
-      File.read("release_notes.txt")
-    rescue
-      "Bug fixes"
-    end
-
-    begin
-      firebase_app_distribution(
-        app: ENV["FIREBASE_ANDROID_APP_ID"],
-        # firebase_cli_token: ENV['FIREBASE_CLI_TOKEN'], # Empty if we already authenticated
-        service_credentials_file: SERVICE_ACCOUNT_PATH,
-        android_artifact_type: "AAB",
-        android_artifact_path: ANDROID_AAB_PATH,
-        release_notes: release_notes,
-        groups: "qa-team,trusted-testers".delete(" "),
-        testers: "soufianex98@gmail.com,soufianes.pro@gmail.com".delete(" "),
-        debug: true
-      )
-    rescue => e
-      UI.error("Failed to upload to Firebase App Distribution: #{e.message}")
-      # Optional: Notify Slack/email on failure
-
-      # Install the plugin: fastlane add_plugin discord
-      # discord(
-      #   message: "Play Store upload failed: #{e.message}",
-      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
-      # )
-
-      # Re raise the error to fail the lane
-      raise e
-    end
-  end
-
-  desc "Submit to Play Store Internal Track"
+  desc "Publish existing AAB to Google Play Internal Testing"
   lane :internal do
-    build_android_app
-    validate_aab!
-
-    begin
-      upload_play_store(track: "internal")
-    rescue => e
-      UI.error("Failed to upload to Play Store: #{e.message}")
-      # Optional: Notify Slack/email on failure
-
-      # Install the plugin: fastlane add_plugin discord
-      # discord(
-      #   message: "Play Store upload failed: #{e.message}",
-      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
-      # )
-
-      # Re raise the error to fail the lane
-      raise e
-    end
+    validate_service_account
+    upload_play_store_release(track: "internal", release_status: "completed")
   end
 
-  # TODO: https://chat.deepseek.com/a/chat/s/a51875b4-0826-4b01-8168-7624ecc20aae
-  desc "Deploy to Play Store Alpha Track (Closed Testing)"
-  lane :alpha do
-    # sh "your_script.sh"
-    # You can also use other beta testing services here
-
-    build_android_app
-    validate_aab!
-
-    begin
-      upload_play_store(track: "alpha")
-    rescue => e
-      UI.error("Failed to upload to Play Store: #{e.message}")
-      # Optional: Notify Slack/email on failure
-
-      # Install the plugin: fastlane add_plugin discord
-      # discord(
-      #   message: "Play Store upload failed: #{e.message}",
-      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
-      # )
-
-      # Re raise the error to fail the lane
-      raise e
-    end
+  desc "Publish existing AAB to Google Play Closed Testing"
+  lane :closed do
+    validate_service_account
+    upload_play_store_release(track: "closed", release_status: "completed")
   end
 
-  desc "Submit to Play Store Beta Track (Open Testing)"
-  lane :beta do
-    # sh "your_script.sh"
-    # You can also use other beta testing services here
-
-    build_android_app
-    validate_aab!
-
-    begin
-      upload_play_store(track: "beta")
-    rescue => e
-      UI.error("Failed to upload to Play Store: #{e.message}")
-      # Optional: Notify Slack/email on failure
-
-      # Install the plugin: fastlane add_plugin discord
-      # discord(
-      #   message: "Play Store upload failed: #{e.message}",
-      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
-      # )
-
-      # Re raise the error to fail the lane
-      raise e
-    end
+  desc "Publish existing AAB to Google Play Open Testing"
+  lane :open do
+    validate_service_account
+    upload_play_store_release(track: "open", release_status: "completed")
   end
 
-  desc "Promote Beta track to production"
-  lane :promote_to_production do
-    # Here we don't need to build the app
-
-    upload_to_play_store(
-      track: "beta",
-      track_promote_to: "production",
-      skip_upload_changelogs: false, # Changelogs must be included
-      json_key: SERVICE_ACCOUNT_PATH
-    )
-  rescue => e
-    UI.error("Failed to upload to Play Store: #{e.message}")
-    # Optional: Notify Slack/email on failure
-
-    # Install the plugin: fastlane add_plugin discord
-    # discord(
-    #   message: "Play Store upload failed: #{e.message}",
-    #   webhook: ENV["DISCORD_WEBHOOK_URL"]
-    # )
-
-    # Re raise the error to fail the lane
-    raise e
-  end
-
-  desc "Deploy to production"
+  desc "Publish existing AAB to Google Play Production"
   lane :production do
-    build_android_app
-    validate_aab!
-
-    begin
-      upload_play_store(track: "production")
-    rescue => e
-      UI.error("Failed to upload to Play Store: #{e.message}")
-      # Optional: Notify Slack/email on failure
-
-      # Install the plugin: fastlane add_plugin discord
-      # discord(
-      #   message: "Play Store upload failed: #{e.message}",
-      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
-      # )
-
-      # Re raise the error to fail the lane
-      raise e
-    end
+    validate_service_account
+    upload_play_store_release(track: "production", release_status: "completed")
   end
 
-  after_all do
-    # TODO: Some logic
+  desc "Publish existing AAB through Firebase App Distribution"
+  lane :firebase do
+    validate_service_account
+    validate_release_services
+    distribute_firebase
+  end
+
+  # ===========================================================================
+  # Public Lanes — Track Promotion
+  # ===========================================================================
+
+  desc "Promote Internal to Closed"
+  lane :promote_internal_to_closed do
+    validate_service_account
+    promote_release(from_track: "internal", to_track: "closed")
+  end
+
+  desc "Promote Closed to Open"
+  lane :promote_closed_to_open do
+    validate_service_account
+    promote_release(from_track: "closed", to_track: "open")
+  end
+
+  desc "Promote Open to Production"
+  lane :promote_open_to_production do
+    validate_service_account
+    promote_release(from_track: "open", to_track: "production")
+  end
+
+  desc "Promote Closed to Production"
+  lane :promote_closed_to_production do
+    validate_service_account
+    promote_release(from_track: "closed", to_track: "production")
+  end
+
+  # ===========================================================================
+  # Diagnostics
+  # ===========================================================================
+
+  desc "Show environment diagnostics"
+  lane :doctor do
+    validate_environment
+    sh("flutter --version")
+    sh("dart --version")
+    sh("flutter doctor -v")
+  end
+
+  desc "Validate release services"
+  lane :services do
+    require_command(command: "curl")
+    validate_release_services
+  end
+
+  desc "Validate service account"
+  lane :service_account do
+    validate_service_account
+  end
+
+  desc "Validate disk space"
+  lane :disk_space do
+    validate_disk_space
+  end
+
+  desc "Run complete release environment validation"
+  lane :validate_release_environment do
+    validate_environment
+    validate_build_version
+    validate_service_account
+    validate_disk_space
+    validate_release_services
+  end
+
+  # ===========================================================================
+  # Fastlane Lifecycle
+  # ===========================================================================
+
+  after_all do |lane|
+    UI.message("Fastlane lane `#{lane}` finished execution.")
   end
 
   error do |lane, exception|
-    UI.error("Error in lane: #{lane}")
+    UI.error("Fastlane lane `#{lane}` failed.")
     UI.error(exception.message)
   end
+
 end

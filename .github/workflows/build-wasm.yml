@@ -1,25 +1,20 @@
 name: Build WASM
-
 on:
   # push:
   #   branches:
   #     - main
   # Enable manual run through GitHub UI
   workflow_dispatch:
-
 env:
-  FLUTTER_VERSION: "3.47.4"
+  FLUTTER_VERSION: "3.47.5"
   FLUTTER_CHANNEL: "stable"
-
 jobs:
   build-wasm:
     name: Build WASM
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-
       - name: Extract metadata from pubspec.yaml
         id: meta
         run: |
@@ -43,20 +38,15 @@ jobs:
           fi
 
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
-          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
-
-      - name: Setup Flutter
+          echo "PREFIX=${APP_NAME}-v${VERSION}-build.${BUILD}-wasm" >> "$GITHUB_ENV"
+      - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
-          #cache: true
-          #cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
-          #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
-          #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
-          #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
           flutter-version: ${{ env.FLUTTER_VERSION }}
-
+          cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
         with:
@@ -66,31 +56,58 @@ jobs:
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
-
+      - name: Get dependencies
+        run: flutter pub get
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
-
-      - name: Create .env
-        run: |
-          printf 'ENV_VAR1=%s\n' \
-            "${{ secrets.ENV_VAR1 }}" > .env
-
-          chmod 600 .env
-
       # - name: Run tests
       #   run: flutter test
-
       - name: Build Web with WASM
         run: |
+          lockfilePath="pubspec.yaml"
+          lockHash=""
+          if [ -f "$lockfilePath" ]; then
+            # Compute SHA256 and take first 12 characters
+            lockHash=$(sha256sum "$lockfilePath" | awk '{print substr($1,1,12)}')
+          else
+            lockHash="no-lockfile"
+          fi
+
+          buildTimestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          gitCommitSha=$(git rev-parse HEAD)
+          gitBranchName=${{ github.ref_name }}
+
+          flutterVersionOutput=$(flutter --version --machine)
+          flutterFwVersion=$(echo "$flutterVersionOutput" | jq -r '.frameworkVersion')
+          flutterChannel=$(echo "$flutterVersionOutput" | jq -r '.channel')
+          flutterVersionStr="Flutter $flutterFwVersion ($flutterChannel)"
+
+          dartVersionStr=$(dart --version 2>&1 | head -n 1)
+
           flutter build web \
             --wasm \
             --release \
-            --build-name=${{ env.APP_VERSION }} \
+            --dart-define="BUILD_NAME=${{ env.BUILD_NAME }}" \
+            --dart-define="BUILD_NUMBER=${{ env.BUILD_NUMBER }}" \
+            --dart-define="FLUTTER_VERSION=$flutterVersionStr" \
+            --dart-define="DART_VERSION=$dartVersionStr" \
+            --dart-define="DEPENDENCY_LOCK_HASH=$lockHash" \
+            --dart-define="BUILD_TIMESTAMP=$buildTimestamp" \
+            --dart-define="GIT_SHA=$gitCommitSha" \
+            --dart-define="GIT_BRANCH=$gitBranchName" \
+            --dart-define="CI_PIPELINE_ID=${{ github.run_id }}" \
+            --dart-define="BUILD_HOST=${{ runner.name }}" \
+            --dart-define="OS_TARGET=${{ runner.os }}" \
+            --dart-define="BUILD_TYPE=release" \
+            --dart-define="BUILD_FLAVOR=production" \
+            --build-name=${{ env.BUILD_NAME }} \
             --build-number=${{ env.BUILD_NUMBER }} \
-            --dart-define-from-file=.env \
+            --source-maps \
+            --enable-wasm-deferred-loading \
+            --tree-shake-icons \
             --base-href / \
             --target lib/main.dart
-
       - name: Verify WASM output
         run: |
           set -euo pipefail
@@ -114,18 +131,16 @@ jobs:
           fi
 
           echo "WASM build verification passed."
-
       - name: Package Web
         run: |
           set -euo pipefail
 
           cd build/web
-          zip -r "../../flutter-web-wasm-${{ env.APP_VERSION }}.zip" .
-
+          zip -r "../../${{ env.PREFIX }}.zip" .
       - name: Upload web WASM
         uses: actions/upload-artifact@v7
         with:
-          name: web-wasm
-          path: "flutter-web-wasm-v${{ env.APP_VERSION }}.zip"
-          if-no-files-found: ignore # To silently skip
-          retention-days: 14
+          name: ${{ env.PREFIX }}
+          path: "${{ env.PREFIX }}.zip"
+          if-no-files-found: error
+          retention-days: 30

@@ -13,7 +13,7 @@ env:
   APP_TITLE: "FlutterCI"
   APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutterci"
-  FLUTTER_VERSION: "3.47.4"
+  FLUTTER_VERSION: "3.47.5"
   FLUTTER_CHANNEL: "stable"
 jobs:
   build-windows:
@@ -25,20 +25,15 @@ jobs:
       matrix:
         include:
           - arch: x64
-            runs-on: windows-latest
+            runs-on: windows-2025-vs2026 # Windows Server 2025 with Visual Studio 2026
             flutter_arch: x64
-            msix_arch: x64
             inno_archs_allowed: x64compatible
             inno_archs_install: x64compatible
-
-          # TODO: Uncomment when Flutter support arm64 on Windows
-          # - arch: arm64
-          #   runs-on: windows-11-arm # native Arm runner
-          #   flutter_arch: arm64
-          #   msix_arch: arm64
-          #   inno_archs_allowed: arm64
-          #   inno_archs_install: arm64
-
+          - arch: arm64
+            runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
+            flutter_arch: arm64
+            inno_archs_allowed: arm64
+            inno_archs_install: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -66,14 +61,15 @@ jobs:
           fi
 
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
-          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
-      - name: Setup Flutter
+          echo "PREFIX=${APP_NAME}-v${VERSION}-build.${BUILD}-windows-${{ matrix.arch }}" >> "$GITHUB_ENV"
+      - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          architecture: ${{ matrix.flutter_arch }}
+          architecture: "${{ matrix.flutter_arch }}"
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
@@ -88,36 +84,70 @@ jobs:
         run: flutter pub get
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
-      - name: Create .env
-        shell: bash
-        run: |
-          printf 'ENV_VAR1=%s\n' \
-            "${{ secrets.ENV_VAR1 }}" > .env
-          chmod 600 .env
-
-      # - name: Verify Formatting
-      #   run: dart format --output=none --set-exit-if-changed .
-
+      - name: Verify Formatting
+        run: dart format --output=none --set-exit-if-changed .
       # - name: Run Tests
       #   run: flutter test
-
-      - name: Build Windows executable
+      - name: Build Windows desktop app (${{ matrix.arch }})
         shell: pwsh
         run: |
+          $lockfilePath = "pubspec.lock"
+          $lockHash=""
+
+          if (Test-Path $lockfilePath) {
+              $lockHash = (Get-FileHash -Algorithm SHA256 -Path $lockfilePath).Hash.Substring(0,12)
+          } else {
+              $lockHash = "no-lockfile"
+          }
+
+          $buildTimestamp = [DateTime]::UtcNow.ToString("o")
+          $gitCommitSha = git rev-parse HEAD
+          $gitBranchName = "${{ github.ref_name }}"
+
+          $flutterVersionOutput = flutter --version --machine | ConvertFrom-Json
+          $flutterFwVersion     = $flutterVersionOutput.frameworkVersion
+          $flutterChannel       = $flutterVersionOutput.channel
+          $flutterVersionStr    = "Flutter $flutterFwVersion ($flutterChannel)"
+
+          $dartVersionStr = ((dart --version 2>&1) -join ' ').Trim()
+
           flutter build windows `
             --release `
-            --dart-define-from-file=.env `
+            --dart-define="IDENTIFIER=${{ env.IDENTIFIER }}" `
+            --dart-define="APP_TITLE=${{ env.APP_TITLE }}" `
+            --dart-define="PUBLISHER=${{ env.APP_PUBLISHER }}" `
+            --dart-define="BUILD_NAME=${{ env.BUILD_NAME }}" `
+            --dart-define="BUILD_NUMBER=${{ env.BUILD_NUMBER }}" `
+            --dart-define="ARCHITECTURE=${{ matrix.arch }}" `
+            --dart-define="FLUTTER_VERSION=$flutterVersionStr" `
+            --dart-define="DART_VERSION=$dartVersionStr" `
+            --dart-define="DEPENDENCY_LOCK_HASH=$lockHash" `
+            --dart-define="BUILD_TIMESTAMP=$buildTimestamp" `
+            --dart-define="GIT_SHA=$gitCommitSha" `
+            --dart-define="GIT_BRANCH=$gitBranchName" `
+            --dart-define="CI_PIPELINE_ID=${{ github.run_id }}" `
+            --dart-define="BUILD_HOST=${{ runner.name }}" `
+            --dart-define="OS_TARGET=${{ runner.os }}" `
+            --dart-define="BUILD_TYPE=release" `
+            --dart-define="BUILD_FLAVOR=production" `
             --obfuscate `
             --split-debug-info=symbols/windows/${{ matrix.arch }} `
-            --build-name=${{ env.APP_VERSION }} `
+            --build-name=${{ env.BUILD_NAME }} `
             --build-number=${{ env.BUILD_NUMBER }} `
             --target lib/main.dart
       - name: Build unsigned MSIX (for Windows Store)
         shell: pwsh
         run: |
+          # Guard: Ensure Publisher ID secret is present
+          $publisher = "${{ secrets.WINDOWS_PUBLISHER_ID }}"
+          if ([string]::IsNullOrWhiteSpace($publisher)) {
+            Write-Host "::error::WINDOWS_PUBLISHER_ID secret is missing or empty"
+            exit 1
+          }
+
           # Guard: logo must exist
           if (-not (Test-Path "assets/logo.png")){
-            Write-Error "::error::assets/logo.png not found - required by msix"
+            Write-Host "::error::assets/logo.png not found - required by msix"
             exit 1
           }
 
@@ -126,84 +156,77 @@ jobs:
           # https://myaccount.microsoft.com/
           # https://entra.microsoft.com/
           # Get Windows Publisher ID from → https://partner.microsoft.com/en-us/dashboard/account/v3/organization/identity
-          dart run msix:create `
-          --architecture "${{ matrix.msix_arch }}" `
-          --display-name "${{ env.APP_TITLE }}" `
-          --publisher "${{ secrets.WINDOWS_PUBLISHER_ID }}" `
-          --publisher-display-name "${{ env.APP_PUBLISHER }}" `
-          --identity-name "${{ env.IDENTIFIER }}" `
-          --logo-path "assets/logo.png" `
-          --capabilities "internetClient, location, microphone, webcam" `
-          --languages "en-us" `
-          --file-extension "picture,image" `
-          --protocol-activation "http,https" `
-          --execution-alias "${{ env.APP_NAME }}" `
-          --store true `
-          --build-windows false `
-          --output-name ${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned `
-          --output-path .
 
-          $msixName = "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned.msix"
+          # Array syntax eliminates line-continuation backtick (`) syntax errors
+          $msixArgs = @(
+            "run", "msix:create",
+            "--architecture", "${{ matrix.flutter_arch }}",
+            "--display-name", "${{ env.APP_TITLE }}",
+            "--publisher", "${{ secrets.WINDOWS_PUBLISHER_ID }}",
+            "--publisher-display-name", "${{ env.APP_PUBLISHER }}",
+            "--identity-name", "${{ env.IDENTIFIER }}",
+            "--logo-path", "assets/logo.png",
+            "--capabilities", "internetClient, location, microphone, webcam",
+            "--languages", "en-us",
+            "--file-extension", "picture,image",
+            "--protocol-activation", "http,https",
+            "--execution-alias", "${{ env.APP_NAME }}",
+            "--store", "true",
+            "--build-windows", "false",
+            "--output-name", "${{ env.PREFIX }}-unsigned",
+            "--output-path", "."
+          )
+
+          dart @msixArgs
+
+          $msixName = "${{ env.PREFIX }}-unsigned.msix"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::MSIX creation command failed"
+            exit 1
+          }
 
           if (-not (Test-Path $msixName -PathType Leaf)) {
-            Write-Error "::error::Expected MSIX not found: $msixName"
+            Write-Host "::error::Expected MSIX not found: $msixName"
             exit 1
           }
 
           if ((Get-Item $msixName).Length -le 0) {
-            Write-Error "::error::MSIX is empty: $msixName"
+            Write-Host "::error::MSIX is empty: $msixName"
             exit 1
           }
 
           Write-Host "✅ MSIX created: $msixName"
-      - name: Upload MSIX
+      - name: Upload MSIX package
         uses: actions/upload-artifact@v7
         with:
-          name: msix-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned
-          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-unsigned.msix"
+          name: ${{ env.PREFIX }}-msix-unsigned
+          path: "${{ env.PREFIX }}-unsigned.msix"
           retention-days: 30
           if-no-files-found: error
-
-      # - name: Configure Microsoft Store CLI
-      #   uses: microsoft/microsoft-store-apppublisher@v1.4
-
-      # - name: Configure Store Credentials
-      #   shell: pwsh
-      #   run: |
-      #     msstore reconfigure `
-      #       --tenantId "${{ secrets.PARTNER_CENTER_TENANT_ID }}" `
-      #       --sellerId "${{ secrets.PARTNER_CENTER_SELLER_ID }}" `
-      #       --clientId "${{ secrets.PARTNER_CENTER_CLIENT_ID }}" `
-      #       --clientSecret "${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}"
-
-      # - name: Publish to Microsoft Store
-      #   shell: pwsh
-      #   run: |
-      #     msstore publish `
-      #       "${{ github.workspace }}/build/windows/x64/runner/Release/${{ env.APP_NAME }}-v${{ env.APP_VERSION }}.msix" `
-      #       -id "${{ secrets.MS_STORE_APP_ID }}"
-
       - name: Upload debug symbols
         uses: actions/upload-artifact@v7
         with:
-          name: windows-debug-symbols-${{ env.APP_VERSION }}-${{ matrix.arch }}
+          name: ${{ env.PREFIX }}-debug-symbols
           path: symbols/windows/${{ matrix.arch }}
-          if-no-files-found: ignore # To silently skip
-          retention-days: 14
+          if-no-files-found: error
+          retention-days: 30
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
       - name: Generate Inno Setup Script
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
+          $year=(Get-Date).Year
 
-          YEAR=$(date +%Y)
-          echo "YEAR=$YEAR" >> "$GITHUB_ENV"
+          # Ensure VersionInfoVersion contains only numeric values (X.Y.Z.W)
+          $rawVersion = "${{ env.BUILD_NAME }}"
+          $cleanVersion = ($rawVersion -replace '[^0-9.]', '').Trim(".")
+          if ([string]::IsNullOrWhiteSpace($cleanVersion)) { $cleanVersion = "1.0.0.0" }
 
-          cat > windows_installer.iss << 'EOF'
+          $issContent = @"
           ; Auto-generated by GitHub Actions - do not edit manually
           #define MyAppName      "${{ env.APP_TITLE }}"
-          #define MyAppVersion   "${{ env.APP_VERSION }}"
+          #define MyAppVersion   "${{ env.BUILD_NAME }}"
           #define MyAppPublisher "${{ env.APP_PUBLISHER }}"
           #define MyAppExeName   "${{ env.APP_NAME }}.exe"
           #define MyAppId        "{{E99ECF80-C4EF-445A-A92F-732BF4627EA0}}"
@@ -220,16 +243,16 @@ jobs:
           AppPublisher={#MyAppPublisher}
           AppPublisherURL=https://github.com/${{ github.repository }}
           AppSupportURL=https://github.com/${{ github.repository }}/issues
-          VersionInfoVersion={#MyAppVersion}
+          VersionInfoVersion=$cleanVersion
           VersionInfoCompany={#MyAppPublisher}
           VersionInfoDescription={#MyAppName} Installer
-          VersionInfoCopyright=(C) ${{ env.YEAR }} {#MyAppPublisher}
+          VersionInfoCopyright=(C) $year {#MyAppPublisher}
           DefaultDirName={autopf}\${{ env.APP_NAME }}
           DefaultGroupName={#MyAppName}
           ; Cleaner UX
           DisableProgramGroupPage=yes
           OutputDir=.
-          OutputBaseFilename=${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup-unsigned
+          OutputBaseFilename=${{ env.PREFIX }}-setup-unsigned
           Compression=lzma2/ultra64
           SolidCompression=yes
           WizardStyle=modern
@@ -259,9 +282,10 @@ jobs:
           [Run]
           ; Launch the main application executable after setup finishes
           Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
-          EOF
+          "@
 
-          echo "✅ windows_installer.iss generated"
+          Set-Content -Path "windows_installer.iss" -Value $issContent -Encoding UTF8
+          Write-Host "✅ windows_installer.iss generated successfully."
       - name: Build Inno setup installer
         run: |
           ISCC.exe "windows_installer.iss"
@@ -270,7 +294,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          INSTALLER="${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup-unsigned.exe"
+          INSTALLER="${{ env.PREFIX }}-setup-unsigned.exe"
           if [ ! -s "$INSTALLER" ]; then
             echo "::error:: Installer missing or empty!"
             exit 1
@@ -280,8 +304,8 @@ jobs:
       - name: Upload Inno Installer
         uses: actions/upload-artifact@v7
         with:
-          name: windows-${{ matrix.arch }}-installer-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-unsigned
-          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-setup-unsigned.exe"
+          name: ${{ env.PREFIX }}-inno-installer
+          path: "${{ env.PREFIX }}-setup-unsigned.exe"
           retention-days: 30
           if-no-files-found: error
       - name: Install NSIS
@@ -301,30 +325,30 @@ jobs:
             }
           }
       - name: Generate NSIS script
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-
-          cat > installer.nsi << 'EOF'
-          ; Auto-generated by GitHub Actions
+          $nsiContent = @'
+          ; Auto-generated by GitHub Actions - do not edit manually
 
           !include "MUI2.nsh"
+          !include "x64.nsh"
 
           !define APPNAME "${{ env.APP_NAME }}"
-          !define VERSION "${{ env.APP_VERSION }}"
+          !define VERSION "${{ env.BUILD_NAME }}"
+          !define BUILD_NUMBER "${{ env.BUILD_NUMBER }}"
           !define COMPANY "${{ env.APP_PUBLISHER }}"
           !define ARCH    "${{ matrix.arch }}"
 
           Name "${APPNAME}"
-          OutFile "${APPNAME}-v${VERSION}-windows-${ARCH}-Installer-unsigned.exe"
-          InstallDir "$PROGRAMFILES\${APPNAME}"
+          OutFile "${{ env.PREFIX }}-installer-unsigned.exe"
+          InstallDir "$PROGRAMFILES64\${APPNAME}"
           RequestExecutionLevel admin
           Unicode True
 
           ; ----- Modern UI settings -----
           !define MUI_ABORTWARNING
-          !define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
-          !define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
+          !define MUI_ICON "$NSISDIR\Contrib\Graphics\Icons\modern-install.ico"
+          !define MUI_UNICON "$NSISDIR\Contrib\Graphics\Icons\modern-uninstall.ico"
 
           ; Optional: custom header/welcome bitmaps (place files in repo)
           ; !define MUI_HEADERIMAGE
@@ -345,7 +369,8 @@ jobs:
 
           ; ----- Install section -----
           Section "Install"
-            SetOutPath $INSTDIR
+            SetRegView 64
+            SetOutPath "$INSTDIR"
             File /r "build\windows\${{ matrix.arch }}\runner\Release\*.*"
 
             ; Create Menu Shortcut
@@ -371,51 +396,46 @@ jobs:
 
           ; ----- Uninstall section -----
           Section "Uninstall"
+          SetRegView 64
             Delete "$INSTDIR\Uninstall.exe"
             RMDir /r "$INSTDIR"
             Delete "$DESKTOP\${APPNAME}.lnk"
             RMDir /r "$SMPROGRAMS\${APPNAME}"
             DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
           SectionEnd
-          EOF
+          '@
 
-          echo "✅ Modern UI installer.nsi generated for ${{ matrix.arch }}"
-
-        # Compile NSIS installer
+          Set-Content -Path "installer.nsi" -Value $nsiContent -Encoding UTF8
+          Write-Host "✅ Modern UI installer.nsi generated successfully."
+      # Compile NSIS installer
       - name: Package with NSIS
         run: makensis installer.nsi
       - name: Upload NSIS Installer
         uses: actions/upload-artifact@v7
         with:
-          name: nsis-windows-installer-${{ matrix.arch }}-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-unsigned
-          path: "${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-Installer-unsigned.exe"
+          name: ${{ env.PREFIX }}-nsis-installer
+          path: "${{ env.PREFIX }}-installer-unsigned.exe"
           retention-days: 30
           if-no-files-found: error
-
       - name: Install 7-Zip
         shell: pwsh
         run: |
           choco install 7zip -y --no-progress
-
       - name: Package Windows
         shell: pwsh
         run: |
-          $AppName = "${{ env.APP_NAME }}"
-          $Version = "${{ env.APP_VERSION }}"
-          $Arch = "${{ matrix.arch }}"
-
-          $Source = "build/windows/$Arch/runner/Release"
-          $Dest = "$AppName-v$Version-windows-$Arch-portable-unsigned.zip"
+          $Source = "build/windows/${{ matrix.arch }}/runner/Release"
+          $Dest = "${{ env.PREFIX }}-portable-unsigned.zip"
 
           if (-Not (Test-Path $Source -PathType Container)) {
-            Write-Error "::error::Windows release directory not found: $Source"
+            Write-Host "::error::Windows release directory not found: $Source"
             exit 1
           }
 
           $Files = Get-ChildItem -Path $Source -Force
 
           if ($Files.Count -eq 0) {
-            Write-Error "::error::Windows release directory is empty: $Source"
+            Write-Host "::error::Windows release directory is empty: $Source"
             exit 1
           }
 
@@ -426,13 +446,13 @@ jobs:
             "$Source\*"
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "::error::7-Zip failed to create package"
+            Write-Host "::error::7-Zip failed to create package"
             exit 1
           }
 
 
           if (-not (Test-Path $Dest -PathType Leaf)) {
-            Write-Error "::error::ZIP package was not created: $Dest"
+            Write-Host "::error::ZIP package was not created: $Dest"
             exit 1
           }
 
@@ -440,11 +460,163 @@ jobs:
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
-          name: windows-${{ matrix.arch }}-portable-${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-unsigned
-          path: ${{ env.APP_NAME }}-v${{ env.APP_VERSION }}-windows-${{ matrix.arch }}-portable-unsigned.zip
+          name: ${{ env.PREFIX }}-portable
+          path: ${{ env.PREFIX }}-portable-unsigned.zip
           retention-days: 30
           if-no-files-found: error
-      - name: Clean up .env
-        if: always()
-        shell: bash
-        run: rm -f .env
+      - name: Generate build manifest
+        shell: pwsh
+        run: |
+          $manifestDir = "."
+          if (-not (Test-Path $manifestDir)) {
+            New-item -ItemType Directory -Path $manifestDir | Out-Null
+          }
+          $manifestPath = Join-Path $manifestDir "windows_build_manifest.json"
+
+          $lockfilePath = "pubspec.lock"
+          $lockHash = ""
+          if (Test-Path $lockfilePath) {
+              $lockHash = (Get-FileHash -Algorithm SHA256 -Path $lockfilePath).Hash.Substring(0,12)
+          } else {
+              $lockHash = "no-lockfile"
+          }
+
+          $gitCommitSha = git rev-parse HEAD
+          $gitBranchName = "${{ github.ref_name }}"
+          $buildTimestamp = [DateTime]::UtcNow.ToString("o")
+
+          # Extract Flutter and Dart versions programmatically
+          $flutterVersionOutput = flutter --version --machine | ConvertFrom-Json
+          $flutterVersionStr = "Flutter $($flutterVersionOutput.frameworkVersion) ($($flutterVersionOutput.channel))"
+          $dartVersionStr = ((dart --version 2>&1) -join ' ').Trim()
+
+          $artifactsObj = [ordered]@{}
+
+          # Collect generated Windows artifacts if they exist
+          $candidateArtifacts = @(
+            "${{ env.PREFIX }}-unsigned.msix",
+            "${{ env.PREFIX }}-setup-unsigned.exe",
+            "${{ env.PREFIX }}-installer-unsigned.exe",
+            "${{ env.PREFIX }}-portable-unsigned.zip"
+          )
+
+          foreach ($art in $candidateArtifacts) {
+            if (Test-Path $art) {
+              $fileItem = Get-Item $art
+              $sha256Hash = (Get-FileHash -Algorithm SHA256 -Path $art).Hash.ToLower()
+              $artifactsObj[$art] = [ordered]@{
+                "type"       = "file"
+                "size_bytes" = $fileItem.Length
+                "sha256"     = $sha256Hash
+              }
+            }
+          }
+
+          $manifest = [ordered]@{
+            "platform"             = "windows"
+            "architecture"         = "${{ matrix.arch }}"
+            "app_title"            = "${{ env.APP_TITLE }}"
+            "publisher"            = "${{ env.APP_PUBLISHER }}"
+            "build_name"           = "${{ env.BUILD_NAME }}"
+            "build_number"         = "${{ env.BUILD_NUMBER }}"
+            "package_name"         = "${{ env.IDENTIFIER }}"
+            "build_flavor"         = "production"
+            "build_type"           = "release"
+            "ci_run_id"            = "${{ github.run_id }}"
+            "dependency_lock_hash" = "$lockHash"
+            "git_sha"              = "$gitCommitSha"
+            "git_branch"           = "$gitBranchName"
+            "build_timestamp"      = "$buildTimestamp"
+            "flutter_version"      = "$flutterVersionStr"
+            "dart_version"         = "$dartVersionStr"
+            "artifacts"            = $artifactsObj
+          }
+
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $manifestPath -Encoding utf8
+          Write-Host "✅ Build manifest generated at $manifestPath"
+      - name: Upload Windows build manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PREFIX }}-manifest
+          path: windows_build_manifest.json
+          retention-days: 30
+          if-no-files-found: error
+
+      # TODO: This should be in its own step (the deploy step)
+      # - name: Configure Microsoft Store CLI
+      #   # NOTE: This step is skipped
+      #   if: false
+      #   uses: microsoft/microsoft-store-apppublisher@v1.4
+      # - name: Configure store credentials
+      #   # NOTE: This step is skipped
+      #   if: false
+      #   shell: pwsh
+      #   env:
+      #     TENANT_ID: "${{ secrets.PARTNER_CENTER_TENANT_ID }}"
+      #     SELLER_ID: "${{ secrets.PARTNER_CENTER_SELLER_ID }}"
+      #     CLIENT_ID: "${{ secrets.PARTNER_CENTER_CLIENT_ID }}"
+      #     CLIENT_SECRET: "${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}"
+      #   run: |
+      #     # Guard: Ensure all required credentials exist
+      #     if (
+      #     [string]::IsNullOrWhiteSpace($env:TENANT_ID) -or
+      #     [string]::IsNullOrWhiteSpace($env:SELLER_ID) -or
+      #     [string]::IsNullOrWhiteSpace($env:CLIENT_ID) -or
+      #     [string]::IsNullOrWhiteSpace($env:CLIENT_SECRET)
+      #     ) {
+      #       Write-Host "::error::One or more Partner Center secrets are missing."
+      #       exit 1
+      #     }
+
+      #     # Array syntax prevents backtick continuation bugs and handles spaces/special characters
+      #     $msstoreArgs = @(
+      #       "reconfigure",
+      #       "--tenantId", $env:TENANT_ID,
+      #       "--sellerId", $env:SELLER_ID,
+      #       "--clientId", $env:CLIENT_ID,
+      #       "--clientSecret", $env:CLIENT_SECRET
+      #     )
+
+      #     msstore @msstoreArgs
+
+      #     if ($LASTEXITCODE -ne 0) {
+      #       Write-Host "::error::Failed to configure Microsoft Store CLI credentials."
+      #       exit 1
+      #     }
+
+      #     Write-Host "✅ Microsoft Store credentials configured successfully."
+      # - name: Publish to Microsoft Store
+      #   # NOTE: This step is skipped
+      #   if: ${{ secrets.MS_STORE_APP_ID != '' }}
+      #   shell: pwsh
+      #   env:
+      #     MS_STORE_APP_ID: ${{ secrets.MS_STORE_APP_ID }}
+      #     MSIX_FILE: ${{ env.PREFIX }}-unsigned.msix
+      #   run: |
+      #     # Guard: Ensure App ID secret exists
+      #     if ([string]::IsNullOrWhiteSpace($env:MS_STORE_APP_ID)) {
+      #       Write-Host "::error::MS_STORE_APP_ID secret is missing or empty"
+      #       exit 1
+      #     }
+
+      #     if (-not (Test-Path $env:MSIX_FILE -PathType Leaf)) {
+      #       Write-Host "::error::MSIX file not found: $env:MSIX_FILE"
+      #       exit 1
+      #     }
+
+      #     Write-Host "Publishing $env:MSIX_FILE to Microsoft Store (App ID: $env:MS_STORE_APP_ID)..."
+
+      #     $msstoreArgs = @(
+      #       "publish",
+      #       $env:MSIX_FILE,
+      #       "-id", $env:MS_STORE_APP_ID
+      #     )
+
+      #     msstore @msstoreArgs
+
+      #     if ($LASTEXITCODE -ne 0) {
+      #       Write-Host "::error::Microsoft Store CLI publish command failed."
+      #       exit 1
+      #     }
+
+      #     Write-Host "✅ Published $env:MSIX_FILE to Microsoft Store successfully."

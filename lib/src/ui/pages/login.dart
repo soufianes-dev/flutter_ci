@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -145,8 +146,34 @@ class _LoginState extends State<Login> {
                             crossAxisAlignment: .start,
                             spacing: 2.0,
                             children: [
+                              if (Platform.isIOS)
+                                Text("APP_IDENTIFIER: ${Env.appIdentifier}"),
+                              if (Platform.isAndroid)
+                                Text(
+                                  "ANDROID_PACKAGE_NAME: ${Env.androidPackageName}",
+                                ),
                               Text("BUILD_NAME:      ${Env.buildName}"),
                               Text("BUILD_NUMBER:    ${Env.buildNumber}"),
+                              Text("BUILD_FLAVOR:    ${Env.buildFlavor}"),
+                              Text("BUILD_TYPE:    ${Env.buildType}"),
+                              Text("CI_PIPELINE_ID:    ${Env.ciPipelineId}"),
+                              Text("BUILD_HOST:    ${Env.buildHost}"),
+                              Text("OS_TARGET:    ${Env.osTarget}"),
+                              Text(
+                                "COMPILER_VERSION:    ${Env.compilerVersion}",
+                              ),
+                              Text(
+                                "DEPENDENCY_LOCK_HASH:    ${Env.dependencyLockHash}",
+                              ),
+                              if (Platform.isIOS || Platform.isAndroid)
+                                Text(
+                                  "SIGNING_CERTIFICATE:    ${Env.signingCertificate}",
+                                ),
+                              Text(
+                                "DEVICE_COMPATIBILITY:    ${Env.deviceCompatibility}",
+                              ),
+                              if (Env.apiBaseURL.isNotEmpty)
+                                Text("API_BASE_URL:    ${Env.apiBaseURL}"),
                               Text("GIT_SHA:         ${Env.gitSha}"),
                               Text("GIT_BRANCH:      ${Env.gitBranch}"),
                               Text("BUILD_TIMESTAMP: ${Env.buildTimestamp}"),

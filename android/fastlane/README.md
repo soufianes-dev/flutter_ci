@@ -15,13 +15,85 @@ For _fastlane_ installation instructions, see [Installing _fastlane_](https://do
 
 ## Android
 
+### android format
+
+```sh
+[bundle exec] fastlane android format
+```
+
+Check Dart formatting
+
+### android analyze
+
+```sh
+[bundle exec] fastlane android analyze
+```
+
+Run Flutter analysis
+
+### android unit_tests
+
+```sh
+[bundle exec] fastlane android unit_tests
+```
+
+Run unit tests
+
+### android widget_tests
+
+```sh
+[bundle exec] fastlane android widget_tests
+```
+
+Run widget tests
+
+### android integration_tests
+
+```sh
+[bundle exec] fastlane android integration_tests
+```
+
+Run integration tests
+
+### android all_tests
+
+```sh
+[bundle exec] fastlane android all_tests
+```
+
+Run all tests
+
+### android coverage
+
+```sh
+[bundle exec] fastlane android coverage
+```
+
+Generate test coverage
+
+### android android_lint
+
+```sh
+[bundle exec] fastlane android android_lint
+```
+
+Run Android lint
+
 ### android test
 
 ```sh
 [bundle exec] fastlane android test
 ```
 
-Runs all the tests
+Run complete quality verification
+
+### android build_android_apk
+
+```sh
+[bundle exec] fastlane android build_android_apk
+```
+
+Build release APK
 
 ### android build_android_app
 
@@ -29,15 +101,79 @@ Runs all the tests
 [bundle exec] fastlane android build_android_app
 ```
 
-Build Android APK and AAB
+Build release AAB
 
-### android distribute
+### android build_all_android_artifacts
 
 ```sh
-[bundle exec] fastlane android distribute
+[bundle exec] fastlane android build_all_android_artifacts
 ```
 
-Distribute app to firebase app distribution
+Build APK and AAB
+
+### android checksums
+
+```sh
+[bundle exec] fastlane android checksums
+```
+
+Generate release checksums
+
+### android build_manifest
+
+```sh
+[bundle exec] fastlane android build_manifest
+```
+
+Generate build manifest for existing Android artifacts
+
+### android validate_apk
+
+```sh
+[bundle exec] fastlane android validate_apk
+```
+
+Validate release APK
+
+### android validate_aab
+
+```sh
+[bundle exec] fastlane android validate_aab
+```
+
+Validate release AAB
+
+### android crashlytics_symbols
+
+```sh
+[bundle exec] fastlane android crashlytics_symbols
+```
+
+Upload Crashlytics symbols
+
+### android validate_metadata
+
+```sh
+[bundle exec] fastlane android validate_metadata
+```
+
+Validate Google Play metadata
+
+### android validate_screenshots
+
+```sh
+[bundle exec] fastlane android validate_screenshots
+```
+
+Validate Google Play screenshots
+
+### android upload_metadata
+
+```sh
+[bundle exec] fastlane android upload_metadata
+```
+
+Upload metadata and screenshots
 
 ### android internal
 
@@ -45,31 +181,23 @@ Distribute app to firebase app distribution
 [bundle exec] fastlane android internal
 ```
 
-Submit to Play Store Internal Track
+Publish existing AAB to Google Play Internal Testing
 
-### android alpha
-
-```sh
-[bundle exec] fastlane android alpha
-```
-
-Deploy to Play Store Alpha Track (Closed Testing)
-
-### android beta
+### android closed
 
 ```sh
-[bundle exec] fastlane android beta
+[bundle exec] fastlane android closed
 ```
 
-Submit to Play Store Beta Track (Open Testing)
+Publish existing AAB to Google Play Closed Testing
 
-### android promote_to_production
+### android open
 
 ```sh
-[bundle exec] fastlane android promote_to_production
+[bundle exec] fastlane android open
 ```
 
-Promote Beta track to production
+Publish existing AAB to Google Play Open Testing
 
 ### android production
 
@@ -77,7 +205,87 @@ Promote Beta track to production
 [bundle exec] fastlane android production
 ```
 
-Deploy to production
+Publish existing AAB to Google Play Production
+
+### android firebase
+
+```sh
+[bundle exec] fastlane android firebase
+```
+
+Publish existing AAB through Firebase App Distribution
+
+### android promote_internal_to_closed
+
+```sh
+[bundle exec] fastlane android promote_internal_to_closed
+```
+
+Promote Internal to Closed
+
+### android promote_closed_to_open
+
+```sh
+[bundle exec] fastlane android promote_closed_to_open
+```
+
+Promote Closed to Open
+
+### android promote_open_to_production
+
+```sh
+[bundle exec] fastlane android promote_open_to_production
+```
+
+Promote Open to Production
+
+### android promote_closed_to_production
+
+```sh
+[bundle exec] fastlane android promote_closed_to_production
+```
+
+Promote Closed to Production
+
+### android doctor
+
+```sh
+[bundle exec] fastlane android doctor
+```
+
+Show environment diagnostics
+
+### android services
+
+```sh
+[bundle exec] fastlane android services
+```
+
+Validate release services
+
+### android service_account
+
+```sh
+[bundle exec] fastlane android service_account
+```
+
+Validate service account
+
+### android disk_space
+
+```sh
+[bundle exec] fastlane android disk_space
+```
+
+Validate disk space
+
+### android validate_release_environment
+
+```sh
+[bundle exec] fastlane android validate_release_environment
+```
+
+Run complete release environment validation
 
 ----
 

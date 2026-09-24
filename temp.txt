@@ -1,0 +1,956 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  FLUTTER_VERSION: "3.47.5"
+  FLUTTER_CHANNEL: "stable"
+  JAVA_VERSION: "17"
+  XCODE_VERSION: "26.6" # Stable Xcode version
+  JAVA_DISTRIBUTION: "temurin"
+  BUNDLE_NAME: "dev.soufianes.flutterci"
+  #TODO: add secret: APPLE_TEAM_ID: "XXXXXXXXXX"
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Extract metadata from pubspec.yaml
+        id: meta
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+          echo "name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - name: List available simulators and runtimes
+        run: |
+          echo "Available device types:"
+          xcrun simctl list devicetypes
+          echo "Available runtimes:"
+          xcrun simctl list runtimes
+          echo "Available devices:"
+          xcrun simctl list devices available
+      - name: Create or select iOS simulator
+        run: |
+          # Find the latest iOS runtime
+          LATEST_IOS_RUNTIME=$(xcrun simctl list runtimes available | grep iOS | tail -1 | awk '{print $NF}' | tr -d '()')
+          echo "Selected iOS runtime: $LATEST_IOS_RUNTIME"
+
+          # Look for an existing iPhone 15 simulator with the selected runtime
+          EXISTING_DEVICE=$(xcrun simctl list devices available | grep "iPhone 15" | grep "$LATEST_IOS_RUNTIME" | awk -F '[()]' '{print $2}' | head -1)
+
+          if [ ! -z "$EXISTING_DEVICE" ]; then
+            echo "Using existing iPhone 15 simulator: $EXISTING_DEVICE"
+            echo "DEVICE_ID=$EXISTING_DEVICE" >> $GITHUB_ENV
+          else
+            echo "No existing iPhone 15 simulator found. Creating new one..."
+            DEVICE_ID=$(xcrun simctl create "GitHub-Action-iPhone" "iPhone 15" "$LATEST_IOS_RUNTIME" || { echo "Failed to create simulator"; exit 1; })
+            echo "Created simulator with ID: $DEVICE_ID"
+            echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
+          fi
+      - name: Boot iOS simulator
+        timeout-minutes: 3
+        run: |
+          # Force software rendering to avoid hardware acceleration issues
+          defaults write com.apple.CoreSimulator.${{ env.DEVICE_ID }} FramebufferEmulationMode -int 2 || echo "Failed to set software rendering, continuing with default"
+
+          xcrun simctl bootstatus ${{ env.DEVICE_ID }} -b
+          xcrun simctl list devices | grep Booted # Visible confirmation in the log
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          #cache: true
+          #cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
+          #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
+          #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      - name: Create .env
+        run: |
+          printf 'ENV_VAR1=%s\n' \
+            "${{ secrets.ENV_VAR1 }}" > .env
+
+          chmod 600 .env
+      - name: Build iOS application (simulator build)
+        run: flutter build ios --simulator --no-codesign
+
+      # - name: Generate export options
+      #   run: |
+      #     cat > ios/export-configs/app-store.plist <<EOF
+      #     <?xml version="1.0" encoding="UTF-8"?>
+      #     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      #     <plist version="1.0">
+      #         <!-- https://chatgpt.com/share/677169bb-f6e4-8002-af7c-60c44af8bf6f -->
+      #         <dict>
+      #             <key>method</key>
+      #             <string>app-store</string>
+      #             <key>teamID</key>
+      #             <string>${{ secrets.APPLE_TEAM_ID }}</string><!-- TODO: teamID -->
+      #             <key>uploadBitcode</key>
+      #             <false />
+      #             <key>uploadSymbols</key>
+      #             <true />
+      #             <key>compileBitCode</key>
+      #             <true />
+      #             <key>stripSwiftSymbols</key>
+      #             <true />
+      #             <key>signingStyle</key>
+      #             <string>manual</string>
+      #             <key>provisioningProfiles</key>
+      #             <dict>
+      #                 <key>${{ env.BUNDLE_NAME }}</key>
+      #                 <string>flutterci_appstore</string><!-- TODO: Your app-store .mobileprovision file name without the file extension-->
+      #             </dict>
+      #         </dict>
+      #     </plist>
+      #     EOF
+
+      # - name: Build release application (.ipa)
+      #   env:
+      #     # TODO: create a base64 data using `base64 -i development.p12` and save it to github secrets
+      #     BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+      #     # TODO: KEYCHAIN_PASSWORD can be any new random password
+      #     KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      #     # TODO: create a base64 data using `base64 -i PROVISIONING_PROFILE.mobileprovision` and save it to github secrets
+      #     BUILD_PROVISIONING_PROFILE_BASE64: ${{ secrets.BUILD_PROVISIONING_PROFILE_BASE64 }}
+      #     P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      #     PP_NAME: flutterci_dev
+      #     EXPORT_METHOD: development # | distribution
+      #     EXPORT_IPA_PATH: "build/ios/ipa/Runner.ipa" # Final IPA artifact path
+      #     APPLE_ID_EMAIL: ${{ secrets.APPLE_ID_EMAIL }}
+      #     APPLE_ID_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_APP_SPECIFIC_PASSWORD }}
+      #   run: |
+      #     # https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications
+
+      #     # Avoid leftover credentials on the runner
+      #     trap 'security delete-keychain $KEYCHAIN_PATH' EXIT
+
+      #     # Create variables
+      #     CERTIFICATE_PATH="$RUNNER_TEMP/$EXPORT_METHOD.p12"
+      #     PP_PATH="$RUNNER_TEMP/$PP_NAME.mobileprovision"
+      #     KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+      #     # Import certificate and provisioning profile from secrets
+      #     echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+      #     echo -n "$BUILD_PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+
+      #     # Create temporary keychain
+      #     security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+      #     security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+      #     PROVISIONING_PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+      #     APP_BUILD_NAME="0.1.0"
+      #     APP_BUILD_NUMBER="1"
+
+      #     # Install certificate to keychain
+      #     security import $CERTIFICATE_PATH \
+      #       -P $P12_PASSWORD \
+      #       -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+      #     security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     security list-keychain -d user -s $KEYCHAIN_PATH
+
+      #     # Confirm that .p12 file is installed
+      #     security find-certificate -c "$EXPORT_METHOD" -a -Z || { echo "Certificate not found!"; exit 1; }
+
+      #     # For Xcode 16 and later
+      #     mkdir -p "$PROVISIONING_PROFILES_DIR" || { echo "Failed to create provisioning profiles directory!"; exit 1; }
+
+      #     # Install provisioning profile
+      #     cp $PP_PATH \
+      #       "$PROVISIONING_PROFILES_DIR" || { echo "Failed to copy provisioning profile!"; exit 1; }
+
+      #     # (Optional) Confirm it's installed (in MacOS machine) :
+      #     ls "$PROVISIONING_PROFILES_DIR"
+
+      #     flutter build ipa \
+      #       --release \
+      #       --export-options-plist=ios/export-configs/$EXPORT_METHOD.plist \
+      #       #--dart-define-from-file=.env
+      #       --obfuscate \
+      #       --split-debug-info=ios/debug-info \
+      #       --build-name=$APP_BUILD_NAME \
+      #       --build-number=$APP_BUILD_NUMBER  || { echo "Flutter build failed!"; exit 1; }
+
+      #     # Archiving debug symbols
+      #     zip -r ios/debug-info/app.dSYM.zip ios/debug-info
+
+      # - name: Archive ipa
+      #   run: |
+      #     (
+      #       cd build/ios/ipa
+      #       zip -r Runner.ipa.zip Runner.ipa
+      #     )
+
+      # - name: Upload ipa artifact
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: ios-ipa-build
+      #     path: build/ios/ipa/Runner.ipa.zip
+
+      # - name: Upload debug symbols
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: ios-debug-symbols
+      #     path: ios/debug-info/app.dSYM.zip
+      #     retention-days: 60
+
+      # - name: Validate ipa
+      #   run: |
+      #     xcrun transporter validate \
+      #     --assetFile $EXPORT_IPA_PATH \
+      #     --username $APPLE_ID_EMAIL \
+      #     --password $APPLE_ID_APP_SPECIFIC_PASSWORD
+
+      # - name: Upload ipa to app store
+      #   run: |
+      #     xcrun transporter upload \
+      #     --assetFile $EXPORT_IPA_PATH \
+      #     --username $APPLE_ID_EMAIL \
+      #     --password $APPLE_ID_APP_SPECIFIC_PASSWORD \
+      #     --verbose
+
+      - name: Upload iOS artifact (simulator build)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-build
+          path: build/ios/iphonesimulator
+          retention-days: 60
+      - name: Install iOS app on simulator
+        run: |
+          # Install onto the currently booted simulator
+          xcrun simctl install booted build/ios/iphonesimulator/Runner.app
+
+          # Install onto a specific simulator by it's UDID
+          # xcrun simctl install ${{ env.DEVICE_ID }} build/ios/iphonesimulator/Runner.app
+
+          # Launch the app using the bundle ID
+          # xcrun simctl launch booted dev.soufianes.flutterci
+
+          # Or xcrun simctl launch ${{ env.DEVICE_ID }} dev.soufianes.flutterci
+
+          # (Optional)
+          # xcrun simctl location booted set 37.7749 -122.4194
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+      - name: Install Maestro CLI
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+          ~/.maestro/bin/maestro --version
+      - name: Test app using Maestro (e2e)
+        run: |
+          mkdir -p maestro/recordings maestro/maestro_outputs
+
+          ~/.maestro/bin/maestro record \
+            -e APP_ID=dev.soufianes.flutterci \
+            --local maestro/flows/main.yaml maestro/recordings/app_flow.mp4
+
+          # Collect screenshots wherever Maestro dropped them
+          find . -path ./maestro -prune -o -maxdepth 3 -name '*.png' -print -exec mv {} maestro/maestro_outputs/ \;
+
+          if [ -n "$(ls -A maestro/maestro_outputs 2>/dev/null)" ]; then
+            zip -r maestro/maestro_outputs.zip maestro/maestro_outputs/
+          else
+            echo "No screenshots found, skipping zip"
+          fi
+          ls -la maestro/recordings maestro/maestro_outputs
+      - name: Upload Maestro outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-maestro-outputs
+          path: |
+            maestro/maestro_outputs.zip
+            maestro/recordings/app_flow.mp4
+          if-no-files-found: warn
+      - name: Shutdown simulator
+        if: always() # Run even if previous steps fail
+        run: |
+          if [ ! -z "${{ env.DEVICE_ID }}" ]; then
+            echo "Shutting down simulator..."
+            xcrun simctl shutdown ${{ env.DEVICE_ID }} || echo "Simulator already shut down or shutdown failed!"
+            xcrun simctl delete ${{ env.DEVICE_ID }} || echo "Simulator deletion failed!"
+          else
+            echo "No DEVICE_ID set, skipping shutdown and delete!"
+          fi
+
+
+
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+
+
+
+
+
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+default_platform(:android)
+
+platform :android do
+  # Constants and configuration
+  SERVICE_ACCOUNT_PATH = "../flutter-ci-432e4-b2e456c83eaa.json"
+  ANDROID_APK_PATH = "../../build/app/outputs/flutter-apk/app-release.apk".freeze
+  ANDROID_AAB_PATH = "../../build/app/outputs/bundle/release/app-release.aab".freeze
+
+  # Build configuration
+  BUILD_NAME = ENV["BUILD_NAME"] || "0.1.0"
+  BUILD_NUMBER = ENV["BUILD_NUMBER"] || "1"
+
+  # Notification Configuration
+  # SLACK_URL = ENV['SLACK_WEBHOOK_URL']
+  # DISCORD_URL = ENV['DISCORD_WEBHOOK_URL']
+  # TEAMS_URL = ENV['TEAMS_WEBHOOK_URL']
+
+  # Git Configuration
+  # GIT_BRANCH = git_branch
+  # GIT_COMMIT = last_git_commit[:commit_hash]
+  # GIT_AUTHOR = last_git_commit[:author]
+
+  before_all do
+    # TODO: Some logic
+  end
+
+  private_lane :clean_builds do
+    UI.message("Cleaning builds...")
+    sh "flutter clean"
+    sh "flutter pub get"
+  end
+
+  private_lane :scan_for_secrets do
+    # git-secrets is used to detect secrets
+    sh "git secrets --scan"
+    UI.message("No secrets detected in code")
+  rescue => e
+    UI.user_error!("Secrets detected in code: #{e.message}")
+  end
+
+  private_lane :audit_dependencies do
+    UI.message("Auditing Flutter dependencies...")
+
+    # Check unknown vulnerabilities
+    sh "flutter pub deps --style=compact"
+  end
+
+  private_lane :check_dependencies do
+    UI.message("Checking dependencies...")
+
+    sh "flutter pub get"
+
+    # Verify dependency integrity
+    sh "flutter analyze --fatal-infos"
+
+    UI.message("Dependency status checked")
+  end
+
+  private_lane :run_code_analysis do
+    UI.message("Running code analysis...")
+
+    sh "flutter analyze"
+
+    sh "dart analyze --fatal-infos ."
+
+    UI.message("Code analysis passed")
+  end
+
+  private_lane :run_tests_with_coverage do
+    UI.message("Running tests with coverage...")
+    sh "flutter test --coverage"
+
+    UI.message("Tests passed")
+  end
+
+  private_lane :flutter_test do
+    run_tests_with_coverage
+  end
+
+  private_lane :build_apk do
+    sh "flutter build apk " \
+      "--obfuscate " \
+      "--split-debug-info=android/debug-info " \
+      "--dart-define-from-file=.env " \
+      "--build-name=#{BUILD_NAME} " \
+      "--build-number=#{BUILD_NUMBER}"
+
+    UI.success("✅ APK built successfully at #{ANDROID_APK_PATH}")
+  end
+
+  private_lane :build_aab do
+    sh "flutter build appbundle" \
+    "--release " \
+    "--obfuscate " \
+    "--split-debug-info=android/debug-info" \
+    "--dart-define-from-file=.env" \
+    "--build-name=#{BUILD_NAME}" \
+    "--build-number=#{BUILD_NUMBER}"
+
+    UI.success("✅ AAB built successfully at #{ANDROID_AAB_PATH}")
+  end
+
+  def validate_aab!
+    UI.message("Current working directory #{Dir.pwd}")
+    UI.message("Validating AAB at #{ANDROID_AAB_PATH}")
+    unless File.exist?(ANDROID_AAB_PATH)
+      UI.user_error!("AAB not found at #{ANDROID_AAB_PATH}. Did the build fail?")
+    end
+  end
+
+  private_lane :upload_play_store do |options|
+    upload_to_play_store(
+      track: options[:track],
+      aab: ANDROID_AAB_PATH,
+      release_status: "completed",
+      json_key: SERVICE_ACCOUNT_PATH,
+      skip_upload_aab: false,
+      skip_upload_apk: true,
+      skip_upload_metadata: false, # Set to false to upload metadata
+      skip_upload_images: false, # Set to false to upload images
+      skip_upload_screenshots: false, # Set to false to upload screenshots
+      timeout: 300
+    )
+  end
+
+  desc "Runs all the tests"
+  lane :test do
+    flutter_test
+  end
+
+  desc "Build Android APK and AAB"
+  lane :build_android_app do
+    clean_builds
+    # build_apk
+    build_aab
+  end
+
+  desc "Only upload Play Store metadata"
+  lane :upload_metadata do
+    upload_to_play_store(
+      json_key: SERVICE_ACCOUNT_PATH,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: false, # Set to false to upload metadata
+      skip_upload_images: false, # Set to false to upload images
+      skip_upload_screenshots: false # Set to false to upload screenshots
+    )
+  end
+
+  desc "Distribute app to Firebase App Distribution"
+  lane :distribute do
+    # https://console.firebase.google.com/u/0/project/flutter-app1-d3af8/settings/integrations/playlink
+    # https://firebase.google.com/docs/app-distribution/android/distribute-fastlane?apptype=aab#before_you_begin
+    # https://play.google.com/console/u/0/developers/8193017614701971889/app-list
+    # https://console.firebase.google.com/u/0/project/flutter-app1-d3af8/appdistribution/app/android:dev.soufianes.flutterci/releases
+    build_android_app
+    validate_aab!
+
+    # Prepare release notes
+    release_notes = begin
+      File.read("release_notes.txt")
+    rescue
+      "Bug fixes"
+    end
+
+    begin
+      firebase_app_distribution(
+        app: ENV["FIREBASE_ANDROID_APP_ID"],
+        # firebase_cli_token: ENV['FIREBASE_CLI_TOKEN'], # Empty if we already authenticated
+        service_credentials_file: SERVICE_ACCOUNT_PATH,
+        android_artifact_type: "AAB",
+        android_artifact_path: ANDROID_AAB_PATH,
+        release_notes: release_notes,
+        groups: "qa-team,trusted-testers".delete(" "),
+        testers: "soufianex98@gmail.com,soufianes.pro@gmail.com".delete(" "),
+        debug: true
+      )
+    rescue => e
+      UI.error("Failed to upload to Firebase App Distribution: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  desc "Submit to Play Store Internal Track"
+  lane :internal do
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "internal")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  # TODO: https://chat.deepseek.com/a/chat/s/a51875b4-0826-4b01-8168-7624ecc20aae
+  desc "Deploy to Play Store Alpha Track (Closed Testing)"
+  lane :alpha do
+    # sh "your_script.sh"
+    # You can also use other beta testing services here
+
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "alpha")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  desc "Submit to Play Store Beta Track (Open Testing)"
+  lane :beta do
+    # sh "your_script.sh"
+    # You can also use other beta testing services here
+
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "beta")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  desc "Promote Beta track to production"
+  lane :promote_to_production do
+    # Here we don't need to build the app
+
+    upload_to_play_store(
+      track: "beta",
+      track_promote_to: "production",
+      skip_upload_changelogs: false, # Changelogs must be included
+      json_key: SERVICE_ACCOUNT_PATH
+    )
+  rescue => e
+    UI.error("Failed to upload to Play Store: #{e.message}")
+    # Optional: Notify Slack/email on failure
+
+    # Install the plugin: fastlane add_plugin discord
+    # discord(
+    #   message: "Play Store upload failed: #{e.message}",
+    #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+    # )
+
+    # Re raise the error to fail the lane
+    raise e
+  end
+
+  desc "Deploy to production"
+  lane :production do
+    build_android_app
+    validate_aab!
+
+    begin
+      upload_play_store(track: "production")
+    rescue => e
+      UI.error("Failed to upload to Play Store: #{e.message}")
+      # Optional: Notify Slack/email on failure
+
+      # Install the plugin: fastlane add_plugin discord
+      # discord(
+      #   message: "Play Store upload failed: #{e.message}",
+      #   webhook: ENV["DISCORD_WEBHOOK_URL"]
+      # )
+
+      # Re raise the error to fail the lane
+      raise e
+    end
+  end
+
+  after_all do
+    # TODO: Some logic
+  end
+
+  error do |lane, exception|
+    UI.error("Error in lane: #{lane}")
+    UI.error(exception.message)
+  end
+end
+
+
+
+
+
+
+
+
+
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+####################################################################
+
+
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+default_platform(:ios)
+
+platform :ios do
+  # TODO: Add environment variables to your CI pip
+  ENV_VALID_KEYS = %w[
+    APP_IDENTIFIER
+    PROVISIONING_PROFILE_NAME
+    APPLE_ID
+    TEAM_ID
+    BUILD_NAME
+    BUILD_NUMBER
+  ]
+
+  BUILD_NAME = ENV["BUILD_NAME"] || "0.1.0"
+  BUILD_NUMBER = latest_testflight_build_number + 1
+
+  # Paths
+  IOS_PROJECT_DIR = "./ios"
+  PODFILE_PATH = File.join(IOS_PROJECT_DIR, "Podfile")
+  XCODEPROJ_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcodeproj")
+  XCODE_WORKSPACE_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcworkspace")
+  OUTPUT_DIR = "./build/ios"
+
+  # Ensure all required environment variables are set
+  def validate_env_vars!
+    ENV_VALID_KEYS.each do |var|
+      UI.user_error!("Missing environment variable #{var} Please set it in your CI/CD pipeline or shell.") unless ENV[var]
+    end
+  end
+
+  before_all do
+    validate_env_vars!
+
+    # Install CocoaPods dependencies
+    UI.message("Installing CocoaPods dependencies...")
+    cocoapods(
+      clean_install: true,
+      podfile: PODFILE_PATH
+    )
+    UI.success("CocoaPods dependencies installed.")
+  end
+
+  private_lane :clean_builds do
+    UI.message("Cleaning builds...")
+    sh "flutter clean"
+    sh "flutter pub get"
+  end
+
+  private_lane :scan_for_secrets do
+    # git-secrets is used to detect secrets
+    sh "git secrets --scan"
+    UI.message("No secrets detected in code")
+  rescue => e
+    UI.user_error!("Secrets detected in code: #{e.message}")
+  end
+
+  private_lane :audit_dependencies do
+    UI.message("Auditing Flutter dependencies...")
+
+    # Check unknown vulnerabilities
+    sh "flutter pub deps --style=compact"
+  end
+
+  private_lane :check_dependencies do
+    UI.message("Checking dependencies...")
+
+    sh "flutter pub get"
+
+    # Verify dependency integrity
+    sh "dart analyze --fatal-infos ."
+
+    UI.message("Dependency status checked")
+  end
+
+  private_lane :run_code_analysis do
+    UI.message("Running code analysis...")
+
+    sh "flutter analyze"
+
+    sh "dart analyze --fatal-infos ."
+
+    UI.message("Code analysis passed")
+  end
+
+  private_lane :run_tests_with_coverage do
+    UI.message("Running tests with coverage...")
+    sh "flutter test --coverage"
+
+    UI.message("Tests passed")
+  end
+
+  private_lane :flutter_test do
+    run_tests_with_coverage
+  end
+
+  # desc "Run Flutter integration tests"
+  # private_lane :flutter_integration_test do
+  #   UI.message("Running Flutter integration tests...")
+  #   sh "flutter test integration_test"
+  #   UI.success("Flutter integration tests finished successfully.")
+  # end
+
+  # Private lane to build iOS app with Flutter
+  # Options:
+  # :flavor (String): The Flutter flavor (e.g., "prod", "dev"). Defaults to "prod"
+  # :export_method (String): The Xcode export method (e.g., "development", "app-store", "ad-hoc", "enterprise"). Defaults to "development"
+  # :build_number (String): The build number for the archive. Required
+  private_lane :flutter_build_ios do |options|
+    clean_builds
+
+    flavor = options[:flavor] || "prod"
+    export_method = options[:export_method] || "development"
+    build_number = options[:build_number] || BUILD_NUMBER
+    scheme = (flavor == "prod") ? "Runner" : "Runner-#{flavor}"
+
+    # unless ENV["APP_IDENTIFIER"] && ENV["PROVISIONING_PROFILE_NAME"]
+    #   UI.user_error!("APP_IDENTIFIER and PROVISIONING_PROFILE_NAME must be set in your environment variables.")
+    # end
+
+    UI.message("Building Flutter iOS app with flavor #{flavor}, export method: #{export_method}, Build number: #{build_number}...")
+    # Build the Flutter iOS app (no codesign as gym will handle it)
+    sh("flutter build ios --#{flavor} --release --obfuscate --split-debug-info=ios/debug-info --dart-define-from-file=.env --build-number=#{build_number} --no-codesign")
+
+    # Build the Xcode archive using gym
+    gym(
+      workspace: XCODE_WORKSPACE_PATH,
+      scheme: scheme,
+      clean: true,
+      export_method: export_method,
+      output_directory: OUTPUT_DIR,
+      output_name: "#{flavor}_#{build_number}.ipa", # Include build number in output name
+      # When using match, gym usually picks up the correct provisioning profile automatically
+      # You can explicitly specify provisioningProfiles if needed, but match simplifies this.
+      export_options: {
+        provisioningProfiles: {
+          ENV["APP_IDENTIFIER"] => ENV["PROVISIONING_PROFILE_NAME"]
+          # e.g., "com.yourcompany.yourapp" => "match AppStore com.yourcompany.yourapp"
+        }
+      }
+    )
+
+    UI.success("iOS app built successfully. to #{File.join(OUTPUT_DIR, "#{flavor}_#{build_number}.ipa")}")
+  end
+
+  # Build the iOS app in debug mode
+  desc "Build the iOS app in debug (development) mode"
+  lane :build_debug do
+    current_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
+    UI.message("Debug build: current build number set to #{current_build_number}")
+
+    # Ensure development match profiles are available if not done before_all
+    match(type: "development", git_url: ENV["MATCH_GIT_URL"], readonly: is_ci?)
+
+    flutter_build_ios(
+      flavor: "dev",
+      export_method: "development",
+      build_number: current_build_number
+    )
+  end
+
+  # Build the iOS app in release mode
+  desc "Build the iOS app in release (App Store) mode"
+  lane :build_release do
+    current_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
+    UI.message("Release build: current build number set to #{current_build_number}")
+
+    # Ensure appstore match profiles are available if not done before_all
+    match(type: "appstore", git_url: ENV["MATCH_GIT_URL"], readonly: is_ci?)
+
+    flutter_build_ios(
+      flavor: "prod",
+      export_method: "app-store",
+      build_number: current_build_number
+    )
+  end
+
+  desc "Submit a new beta build to TestFlight"
+  lane :beta do
+    # Get the latest build number and increment it for the new Build
+    # Handle the case where there are no previous TestFlight builds
+    begin
+      next_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
+    rescue
+      UI.warning("Could not determine latest TestFlight build number: #{next_build_number}")
+      next_build_number = 1 # Start from 1 if no existing builds are found
+    end
+
+    UI.message("Preparing to submit to TestFlight with build number: #{next_build_number}")
+
+    # Increment the build number in Xcode project (optional can be dione by gym/flutter build if passed correctly)
+    # This ensures the .xcodeproj file also reflects the build number.
+
+    increment_build_number(
+      build_number: next_build_number,
+      xcodeproj: XCODEPROJ_PATH
+    )
+
+    # Build the release version of the app
+    # The `flutter_build_ios` lane will use the `next_build_number`
+    flutter_build_ios(
+      flavor: "prod",
+      export_method: "app-store", # TestFlight builds usually use "app-store" export method
+      build_number: next_build_number
+    )
+
+    # Upload to TestFlight
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true, # Speeds up the lane execution
+      # TODO:
+      apple_id: ENV["APPLE_ID"], # e.g., "your_apple_id@email.com"
+      team_id: ENV["TEAM_ID"] # "YOUR_TEAM_ID"
+      # groups: ["testers"], Optional: Specify tester groups
+      # changelog: "Beta build for testing." # Optional: Add a changelog message
+    )
+    UI.success("Successfully uploaded new beta build to TestFlight!")
+  end
+
+  # Deploy to App Store
+  desc "Deploy a new version to the App Store"
+  lane :deploy do
+    # TODO: `fastlane deliver` to upload metadata
+    # Increment version number (you might want to use semantic versioning)
+    increment_version_number(
+      version_number: BUILD_NAME, # TODO: Replace with your versioning logic
+      xcodeproj: XCODEPROJ_PATH
+    )
+    # Build the release
+    build_release
+    # Upload to the App Store Connect
+    upload_to_app_store(
+      skip_metadata: true, # TODO: 
+      skip_screenshots: true,
+      apple_id: ENV["APPLE_ID"], # e.g., "your_apple_id@email.com"
+      team_id: ENV["TEAM_ID"] # "YOUR_TEAM_ID"
+    )
+  end
+
+  desc "Description of what the lane does"
+  lane :custom_lane do
+    # add actions here: https://docs.fastlane.tools/actions
+  end
+
+  after_all do
+    puts "Fastlane finished successfully!"
+  end
+
+  error do |lane, exception|
+    UI.error("Error in lane: #{lane}")
+    UI.error(exception.message)
+  end
+end

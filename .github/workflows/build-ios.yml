@@ -1,5 +1,4 @@
 name: iOS Build
-
 on:
   workflow_dispatch:
   # push:
@@ -8,29 +7,52 @@ on:
   pull_request:
     branches:
       - main
-
 env:
-  FLUTTER_VERSION: "3.47.4"
+  FLUTTER_VERSION: "3.47.5"
   FLUTTER_CHANNEL: "stable"
   JAVA_VERSION: "17"
   XCODE_VERSION: "26.6" # Stable Xcode version
   JAVA_DISTRIBUTION: "temurin"
-  BUNDLE_NAME: "dev.soufianes.flutterci"
-  #TODO: add secret: APPLE_TEAM_ID: "XXXXXXXXXX"
-
+  APP_IDENTIFIER: "dev.soufianes.flutterci"
+  WORKING_DIR: "ios"
 jobs:
   build-ios:
     runs-on: macos-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+      - name: Extract metadata from pubspec.yaml
+        id: meta
+        run: |
+          set -euo pipefail
 
+          if [[ ! -f pubspec.yaml ]]; then
+            echo "::error::pubspec.yaml not found"
+            exit 1
+          fi
+
+          # Read Project Name From pubspec.yaml
+          APP_NAME=$(grep -E '^name:' pubspec.yaml | sed 's/name:[[:space:]]*//' | tr -d '\r')
+
+          # Extract Version from pubspec.yaml
+          VERSION_LINE=$(grep -E '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+          VERSION=${VERSION_LINE%%+*}
+          BUILD=${VERSION_LINE##*+}
+          if [[ -z "$APP_NAME" || -z "$VERSION" ]]; then
+            echo "::error::Could not parse name or version from pubspec.yaml"
+            exit 1
+          fi
+
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+
+          echo "name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
-
       - name: List available simulators and runtimes
         run: |
           echo "Available device types:"
@@ -39,7 +61,6 @@ jobs:
           xcrun simctl list runtimes
           echo "Available devices:"
           xcrun simctl list devices available
-
       - name: Create or select iOS simulator
         run: |
           # Find the latest iOS runtime
@@ -58,7 +79,6 @@ jobs:
             echo "Created simulator with ID: $DEVICE_ID"
             echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
           fi
-
       - name: Boot iOS simulator
         timeout-minutes: 3
         run: |
@@ -67,17 +87,12 @@ jobs:
 
           xcrun simctl bootstatus ${{ env.DEVICE_ID }} -b
           xcrun simctl list devices | grep Booted # Visible confirmation in the log
-      - name: Setup Flutter
+      - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
-          #cache: true
-          #cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
-          #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
-          #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
-          #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
           flutter-version: ${{ env.FLUTTER_VERSION }}
-
+          cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
         with:
@@ -87,160 +102,45 @@ jobs:
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
-
-      - name: Create .env
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Build iOS application
+        env:
+          APP_NAME: ${{ env.APP_NAME }}
+          BUILD_NAME: ${{ env.BUILD_NAME }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
+          BUILD_TYPE: "debug"
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          RUNNER_NAME: ${{ runner.name }}
+          APP_IDENTIFIER: ${{ env.APP_IDENTIFIER }}
+          CI_PIPELINE_ID: ${{ github.run_id }}
+          BUILD_HOST: ${{ runner.name }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # TEAM_ID: ${{ secrets.TEAM_ID }}
+          # APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          # APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          # APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+          # FIREBASE_SERVICE_CREDENTIALS_FILE: ${{ secrets.FIREBASE_SERVICE_CREDENTIALS_FILE }}
+          # FIREBASE_APP_DISTRIBUTION_TESTERS: ${{ secrets.FIREBASE_APP_DISTRIBUTION_TESTERS }}
+        working-directory: ${{ env.WORKING_DIR }}
         run: |
-          printf 'ENV_VAR1=%s\n' \
-            "${{ secrets.ENV_VAR1 }}" > .env
-
-          chmod 600 .env
-
-      - name: Build iOS application (simulator build)
-        run: flutter build ios --simulator --no-codesign
-
-      # - name: Generate export options
-      #   run: |
-      #     cat > ios/export-configs/app-store.plist <<EOF
-      #     <?xml version="1.0" encoding="UTF-8"?>
-      #     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      #     <plist version="1.0">
-      #         <!-- https://chatgpt.com/share/677169bb-f6e4-8002-af7c-60c44af8bf6f -->
-      #         <dict>
-      #             <key>method</key>
-      #             <string>app-store</string>
-      #             <key>teamID</key>
-      #             <string>${{ secrets.APPLE_TEAM_ID }}</string><!-- TODO: teamID -->
-      #             <key>uploadBitcode</key>
-      #             <false />
-      #             <key>uploadSymbols</key>
-      #             <true />
-      #             <key>compileBitCode</key>
-      #             <true />
-      #             <key>stripSwiftSymbols</key>
-      #             <true />
-      #             <key>signingStyle</key>
-      #             <string>manual</string>
-      #             <key>provisioningProfiles</key>
-      #             <dict>
-      #                 <key>${{ env.BUNDLE_NAME }}</key>
-      #                 <string>flutterci_appstore</string><!-- TODO: Your app-store .mobileprovision file name without the file extension-->
-      #             </dict>
-      #         </dict>
-      #     </plist>
-      #     EOF
-
-      # - name: Build release application (.ipa)
-      #   env:
-      #     # TODO: create a base64 data using `base64 -i development.p12` and save it to github secrets
-      #     BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-      #     # TODO: KEYCHAIN_PASSWORD can be any new random password
-      #     KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-      #     # TODO: create a base64 data using `base64 -i PROVISIONING_PROFILE.mobileprovision` and save it to github secrets
-      #     BUILD_PROVISIONING_PROFILE_BASE64: ${{ secrets.BUILD_PROVISIONING_PROFILE_BASE64 }}
-      #     P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-      #     PP_NAME: flutterci_dev
-      #     EXPORT_METHOD: development # | distribution
-      #     EXPORT_IPA_PATH: "build/ios/ipa/Runner.ipa" # Final IPA artifact path
-      #     APPLE_ID_EMAIL: ${{ secrets.APPLE_ID_EMAIL }}
-      #     APPLE_ID_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_APP_SPECIFIC_PASSWORD }}
-      #   run: |
-      #     # https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications
-
-      #     # Avoid leftover credentials on the runner
-      #     trap 'security delete-keychain $KEYCHAIN_PATH' EXIT
-
-      #     # Create variables
-      #     CERTIFICATE_PATH="$RUNNER_TEMP/$EXPORT_METHOD.p12"
-      #     PP_PATH="$RUNNER_TEMP/$PP_NAME.mobileprovision"
-      #     KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
-
-      #     # Import certificate and provisioning profile from secrets
-      #     echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
-      #     echo -n "$BUILD_PROVISIONING_PROFILE_BASE64" | base64 --decode -o $PP_PATH
-
-      #     # Create temporary keychain
-      #     security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-      #     security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-      #     security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-      #     PROVISIONING_PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
-      #     APP_BUILD_NAME="0.1.0"
-      #     APP_BUILD_NUMBER="1"
-
-      #     # Install certificate to keychain
-      #     security import $CERTIFICATE_PATH \
-      #       -P $P12_PASSWORD \
-      #       -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-      #     security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-      #     security list-keychain -d user -s $KEYCHAIN_PATH
-
-      #     # Confirm that .p12 file is installed
-      #     security find-certificate -c "$EXPORT_METHOD" -a -Z || { echo "Certificate not found!"; exit 1; }
-
-      #     # For Xcode 16 and later
-      #     mkdir -p "$PROVISIONING_PROFILES_DIR" || { echo "Failed to create provisioning profiles directory!"; exit 1; }
-
-      #     # Install provisioning profile
-      #     cp $PP_PATH \
-      #       "$PROVISIONING_PROFILES_DIR" || { echo "Failed to copy provisioning profile!"; exit 1; }
-
-      #     # (Optional) Confirm it's installed (in MacOS machine) :
-      #     ls "$PROVISIONING_PROFILES_DIR"
-
-      #     flutter build ipa \
-      #       --release \
-      #       --export-options-plist=ios/export-configs/$EXPORT_METHOD.plist \
-      #       #--dart-define-from-file=.env
-      #       --obfuscate \
-      #       --split-debug-info=ios/debug-info \
-      #       --build-name=$APP_BUILD_NAME \
-      #       --build-number=$APP_BUILD_NUMBER  || { echo "Flutter build failed!"; exit 1; }
-
-      #     # Archiving debug symbols
-      #     zip -r ios/debug-info/app.dSYM.zip ios/debug-info
-
-      # - name: Archive ipa
-      #   run: |
-      #     (
-      #       cd build/ios/ipa
-      #       zip -r Runner.ipa.zip Runner.ipa
-      #     )
-
-      # - name: Upload ipa artifact
-      #   uses: actions/upload-artifact@v7
-      #   with:
-      #     name: ios-ipa-build
-      #     path: build/ios/ipa/Runner.ipa.zip
-
-      # - name: Upload debug symbols
-      #   uses: actions/upload-artifact@v7
-      #   with:
-      #     name: ios-debug-symbols
-      #     path: ios/debug-info/app.dSYM.zip
-      #     retention-days: 60
-
-      # - name: Validate ipa
-      #   run: |
-      #     xcrun transporter validate \
-      #     --assetFile $EXPORT_IPA_PATH \
-      #     --username $APPLE_ID_EMAIL \
-      #     --password $APPLE_ID_APP_SPECIFIC_PASSWORD
-
-      # - name: Upload ipa to app store
-      #   run: |
-      #     xcrun transporter upload \
-      #     --assetFile $EXPORT_IPA_PATH \
-      #     --username $APPLE_ID_EMAIL \
-      #     --password $APPLE_ID_APP_SPECIFIC_PASSWORD \
-      #     --verbose
-
+          # fastlane add_plugin firebase_app_distribution
+          bundle install
+          bundle exec fastlane build_simulator
+          # bundle exec fastlane build_debug
+          # bundle exec fastlane build_firebase
+          # bundle exec fastlane build_release
       - name: Upload iOS artifact (simulator build)
         uses: actions/upload-artifact@v7
         with:
-          name: ios-build
-          path: build/ios/iphonesimulator
+          name: ios-artifacts
+          path: |
+            build/ios/iphonesimulator
+            .fastlane/build_manifest.json
           retention-days: 60
-
       - name: Install iOS app on simulator
         run: |
           # Install onto the currently booted simulator
@@ -250,31 +150,28 @@ jobs:
           # xcrun simctl install ${{ env.DEVICE_ID }} build/ios/iphonesimulator/Runner.app
 
           # Launch the app using the bundle ID
-          # xcrun simctl launch booted dev.soufianes.flutterci
+          # xcrun simctl launch booted ${{ env.APP_IDENTIFIER }}
 
-          # Or xcrun simctl launch ${{ env.DEVICE_ID }} dev.soufianes.flutterci
+          # Or xcrun simctl launch ${{ env.DEVICE_ID }} ${{ env.APP_IDENTIFIER }}
 
           # (Optional)
           # xcrun simctl location booted set 37.7749 -122.4194
-
       - name: Setup Java
         uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: ${{ env.JAVA_DISTRIBUTION }}
-
       - name: Install Maestro CLI
         run: |
           curl -Ls "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> $GITHUB_PATH
           ~/.maestro/bin/maestro --version
-
       - name: Test app using Maestro (e2e)
         run: |
           mkdir -p maestro/recordings maestro/maestro_outputs
 
           ~/.maestro/bin/maestro record \
-            -e APP_ID=dev.soufianes.flutterci \
+            -e APP_ID=${{ env.APP_IDENTIFIER }} \
             --local maestro/flows/main.yaml maestro/recordings/app_flow.mp4
 
           # Collect screenshots wherever Maestro dropped them
@@ -286,7 +183,6 @@ jobs:
             echo "No screenshots found, skipping zip"
           fi
           ls -la maestro/recordings maestro/maestro_outputs
-
       - name: Upload Maestro outputs
         if: always()
         uses: actions/upload-artifact@v7
@@ -296,7 +192,6 @@ jobs:
             maestro/maestro_outputs.zip
             maestro/recordings/app_flow.mp4
           if-no-files-found: warn
-
       - name: Shutdown simulator
         if: always() # Run even if previous steps fail
         run: |

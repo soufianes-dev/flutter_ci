@@ -1,268 +1,1077 @@
-# This file contains the fastlane.tools configuration
-# You can find the documentation at https://docs.fastlane.tools
-#
-# For a list of all available actions, check out
-#
-#     https://docs.fastlane.tools/actions
-#
-# For a list of all available plugins, check out
-#
-#     https://docs.fastlane.tools/plugins/available-plugins
-#
+# AI GENERATED
 
-# Uncomment the line if you want fastlane to automatically update itself
-# update_fastlane
+# fastlane/Fastfile
+#
+# =============================================================================
+# Fastlane Configuration — Flutter iOS (Hardened Production Release v3)
+# =============================================================================
+
+require "json"
+require "fileutils"
+require "digest"
+require "time"
+require "shellwords"
+require "socket"
 
 default_platform(:ios)
 
 platform :ios do
-  # TODO: Add environment variables to your CI pip
-  ENV_VALID_KEYS = %w[
-    APP_IDENTIFIER
-    PROVISIONING_PROFILE_NAME
-    APPLE_ID
-    TEAM_ID
-    BUILD_NAME
-    BUILD_NUMBER
-  ]
 
-  BUILD_NAME = ENV["BUILD_NAME"] || "0.1.0"
-  BUILD_NUMBER = latest_testflight_build_number + 1
+  # ===========================================================================
+  # Dynamic Environment Accessors (Nil-Safe)
+  # ===========================================================================
 
-  # Paths
-  IOS_PROJECT_DIR = "./ios"
-  PODFILE_PATH = File.join(IOS_PROJECT_DIR, "Podfile")
-  XCODEPROJ_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcodeproj")
-  XCODE_WORKSPACE_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcworkspace")
-  OUTPUT_DIR = "./build/ios"
+  def build_name
+    ENV["BUILD_NAME"].to_s.strip
+  end
 
-  # Ensure all required environment variables are set
-  def validate_env_vars!
-    ENV_VALID_KEYS.each do |var|
-      UI.user_error!("Missing environment variable #{var} Please set it in your CI/CD pipeline or shell.") unless ENV[var]
+  def build_number
+    ENV["BUILD_NUMBER"].to_s.strip
+  end
+
+  def app_identifier
+    ENV["APP_IDENTIFIER"].to_s.strip
+  end
+
+  def apple_id
+    ENV["APPLE_ID"].to_s.strip
+  end
+
+  def team_id
+    ENV["TEAM_ID"].to_s.strip
+  end
+
+  def firebase_app_id
+    ENV["FIREBASE_APP_ID"].to_s.strip
+  end
+
+  def firebase_testers
+    ENV["FIREBASE_APP_DISTRIBUTION_TESTERS"].to_s.strip
+  end
+
+  def firebase_service_credentials
+    (ENV["FIREBASE_SERVICE_CREDENTIALS_FILE"] || ENV["GOOGLE_APPLICATION_CREDENTIALS"]).to_s.strip
+  end
+
+  def asc_key_id
+    ENV["APP_STORE_CONNECT_KEY_ID"].to_s.strip
+  end
+
+  def asc_issuer_id
+    ENV["APP_STORE_CONNECT_ISSUER_ID"].to_s.strip
+  end
+
+  def asc_key_content
+    ENV["APP_STORE_CONNECT_KEY_CONTENT"].to_s.strip
+  end
+
+  def asc_key_path
+    ENV["APP_STORE_CONNECT_KEY_PATH"].to_s.strip
+  end
+
+  def api_base_url
+    ENV["API_BASE_URL"].to_s.strip
+  end
+
+  def require_api_base_url!
+    url = api_base_url
+    if url.empty?
+      UI.user_error!("API_BASE_URL environment variable is required.")
+    end
+    url
+  end
+
+  def artifact_flavor
+    flavor = ENV.fetch("ARTIFACT_FLAVOR", "release").downcase.strip
+    unless flavor.match?(/\A[0-9a-z._-]+\z/)
+      UI.user_error!("ARTIFACT_FLAVOR contains invalid characters: '#{flavor}'")
+    end
+    flavor
+  end
+
+  # Project Paths & Directory Configuration
+  IOS_PROJECT_DIR      = "./ios".freeze
+  XCODEPROJ_PATH       = File.join(IOS_PROJECT_DIR, "Runner.xcodeproj").freeze
+  XCODE_WORKSPACE_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcworkspace").freeze
+  OUTPUT_DIR           = ENV.fetch("IOS_OUTPUT_DIR", "build/ios").freeze
+  DEBUG_INFO_DIRECTORY = ENV.fetch("DEBUG_INFO_DIRECTORY", "symbols/ios").freeze
+  PROJECT_ROOT = begin
+    dir = __dir__
+    while dir != "/" && !File.exist?(File.join(dir, "pubspec.yaml"))
+      dir = File.expand_path("..", dir)
+    end
+    dir
+  end.freeze
+
+  SIMULATOR_APP_PATH   = ENV.fetch("IOS_SIMULATOR_APP_PATH", File.join(PROJECT_ROOT, "build/ios/iphonesimulator/Runner.app")).freeze
+  DEBUG_APP_PATH       = ENV.fetch("IOS_DEBUG_APP_PATH", File.join(PROJECT_ROOT, "build/ios/iphoneos/Runner.app")).freeze
+  FIREBASE_OUTPUT_DIR  = ENV.fetch("FIREBASE_OUTPUT_DIR", File.join(PROJECT_ROOT, "build/ios/firebase")).freeze
+  FIREBASE_IPA_PATH    = ENV.fetch("FIREBASE_IPA_PATH", File.join(FIREBASE_OUTPUT_DIR, "ios", "ipa", "Runner.ipa")).freeze
+  FIREBASE_ARCHIVE_PATH = ENV.fetch("FIREBASE_ARCHIVE_PATH", File.join(FIREBASE_OUTPUT_DIR, "ios", "archive", "Runner.xcarchive")).freeze
+
+  RELEASE_IPA_PATH     = ENV.fetch("IOS_IPA_PATH", "build/ios/ipa/Runner.ipa").freeze
+  RELEASE_ARCHIVE_PATH = ENV.fetch("IOS_ARCHIVE_PATH", "build/ios/archive/Runner.xcarchive").freeze
+
+  BUILD_MANIFEST_FILE  = ENV.fetch("IOS_BUILD_MANIFEST", File.join(PROJECT_ROOT, "ios_build_manifest.json")).freeze
+
+  # Fallback to "app" if APP_NAME sanitizes to an empty string
+  sanitized_app_name   = ENV.fetch("APP_NAME", "runner").downcase.gsub(/[^a-z0-9]+/, "-").sub(/\A-+/, "").sub(/-+\z/, "")
+  APP_NAME             = (sanitized_app_name.empty? ? "app" : sanitized_app_name).freeze
+
+  FIREBASE_GROUPS      = ENV.fetch("FIREBASE_APP_DISTRIBUTION_GROUPS", "qa-team").freeze
+
+  METADATA_DIRECTORY   = ENV.fetch("FASTLANE_METADATA_PATH", "fastlane/metadata").freeze
+  SCREENSHOTS_DIRECTORY = ENV.fetch("FASTLANE_SCREENSHOTS_PATH", "fastlane/screenshots").freeze
+  RELEASE_NOTES_FILE   = ENV.fetch("RELEASE_NOTES_FILE", "release_notes.txt").freeze
+
+  # ===========================================================================
+  # System & Environment Helpers
+  # ===========================================================================
+
+  private_lane :flutter_version_info do
+    @flutter_version ||= begin
+      json_output = sh("flutter --version --machine")
+      parsed = JSON.parse(json_output)
+      "Flutter #{parsed['frameworkVersion']} (#{parsed['channel']})"
+    rescue => e
+      UI.important("Could not fetch Flutter version details: #{e.message}")
+      "Flutter Unknown"
     end
   end
 
-  before_all do
-    validate_env_vars!
+  private_lane :dart_version_info do
+    @dart_version ||= begin
+      sh("dart --version 2>&1").lines.first.to_s.strip
+    rescue => e
+      UI.important("Could not fetch Dart version: #{e.message}")
+      "Dart Unknown"
+    end
+  end
 
-    # Install CocoaPods dependencies
-    UI.message("Installing CocoaPods dependencies...")
-    cocoapods(
-      clean_install: true,
-      podfile: PODFILE_PATH
+  private_lane :xcode_version_info do
+    @xcode_version ||= begin
+      sh("xcodebuild -version").lines.first.to_s.strip
+    rescue => e
+      UI.important("Could not fetch Xcode version: #{e.message}")
+      "Xcode Unknown"
+    end
+  end
+
+  private_lane :require_command do |options|
+    command = options.fetch(:command)
+    unless system("command -v #{command.to_s.shellescape} > /dev/null 2>&1")
+      UI.user_error!("Required command was not found in system PATH: #{command}")
+    end
+  end
+
+  private_lane :require_file do |options|
+    path = options.fetch(:path).to_s.strip
+    name = options.fetch(:name, path)
+
+    if path.empty? || !File.exist?(path) || File.directory?(path)
+      UI.user_error!("#{name} file not found or path is invalid: '#{path}'")
+    end
+  end
+
+  private_lane :require_directory do |options|
+    path = options.fetch(:path).to_s.strip
+    name = options.fetch(:name, path)
+
+    if path.empty? || !Dir.exist?(path)
+      UI.user_error!("#{name} directory not found or path is empty: '#{path}'")
+    end
+  end
+
+  private_lane :validate_artifact do |options|
+    path = options.fetch(:path)
+    name = options.fetch(:name, path)
+
+    if File.directory?(path)
+      require_directory(path: path, name: name)
+      files = Dir.glob(File.join(path, "**", "*")).select { |item| File.file?(item) }
+      if files.empty?
+        UI.user_error!("#{name} directory contains no files: #{path}")
+      end
+      empty_files = files.select { |f| File.size(f).zero? }
+      unless empty_files.empty?
+        UI.user_error!("#{name} contains empty files (e.g. #{empty_files.first})")
+      end
+    else
+      require_file(path: path, name: name)
+      if File.size(path).zero?
+        UI.user_error!("#{name} is empty: #{path}")
+      end
+    end
+
+    UI.success("#{name} validated: #{path}")
+  end
+
+  private_lane :git_commit_sha do
+    sh("git rev-parse HEAD").strip
+  rescue
+    "unknown"
+  end
+
+  private_lane :git_branch_name do
+    sh("git rev-parse --abbrev-ref HEAD").strip
+  rescue
+    "unknown"
+  end
+
+  private_lane :dart_define_args do |options|
+    options ||= {}
+    pipeline_id = ENV["GITHUB_RUN_ID"] || ENV["CI_PIPELINE_ID"] || "local-#{Time.now.to_i}"
+    build_host  = ENV["RUNNER_NAME"] || (Socket.gethostname rescue "local-machine")
+
+    flavor     = options[:flavor] || ENV.fetch("BUILD_FLAVOR", "dev")
+    build_type = options[:build_type] || ENV.fetch("BUILD_TYPE", "release")
+
+    lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
+    lock_hash = File.exist?(lockfile_path) ? Digest::SHA256.file(lockfile_path).hexdigest[0..11] : "no-lockfile"
+
+    os_target       = ENV.fetch("OS_TARGET", "ios-arm64")
+    signing_cert    = ENV.fetch("SIGNING_CERTIFICATE", "Apple Development/Automatic")
+    device_compat   = ENV.fetch("DEVICE_COMPATIBILITY", "iOS 14.0+")
+
+    defines = {
+      "APP_IDENTIFIER"       => app_identifier,
+      "BUILD_NAME"           => build_name,
+      "BUILD_NUMBER"         => build_number,
+      "BUILD_FLAVOR"         => flavor,
+      "BUILD_TYPE"           => build_type,
+      "CI_PIPELINE_ID"       => pipeline_id,
+      "BUILD_HOST"           => build_host,
+      "OS_TARGET"             => os_target,
+      "COMPILER_VERSION"     => "#{flutter_version_info}, #{xcode_version_info}",
+      "DEPENDENCY_LOCK_HASH" => lock_hash,
+      "SIGNING_CERTIFICATE"  => signing_cert,
+      "DEVICE_COMPATIBILITY" => device_compat,
+      "API_BASE_URL"         => require_api_base_url!,
+      "GIT_SHA"              => git_commit_sha,
+      "GIT_BRANCH"           => git_branch_name,
+      "BUILD_TIMESTAMP"      => Time.now.utc.iso8601
+    }
+
+    defines.map { |k, v| "--dart-define=#{k}=#{v}" }
+  end
+
+  private_lane :prepare_fastlane_directories do
+    [
+      File.dirname(BUILD_MANIFEST_FILE),
+      OUTPUT_DIR,
+      FIREBASE_OUTPUT_DIR
+    ].each do |directory|
+      FileUtils.mkdir_p(directory)
+    end
+  end
+
+  # ===========================================================================
+  # Artifact Naming & Management
+  # ===========================================================================
+
+  private_lane :artifact_filename do |options|
+    extension = options.fetch(:extension)
+    platform  = options.fetch(:platform)
+    flavor    = options[:flavor]
+    signed    = options.fetch(:signed, false)
+
+    signed_status = signed ? "signed" : "unsigned"
+
+    parts = [
+      APP_NAME,
+      "v#{build_name}-build.#{build_number}",
+      platform
+    ]
+
+    parts << flavor unless flavor.to_s.strip.empty?
+    parts << signed_status
+
+    "#{parts.join("-")}.#{extension}"
+  end
+
+  private_lane :copy_artifact do |options|
+    source      = options.fetch(:source)
+    destination = options.fetch(:destination)
+
+    if File.directory?(source)
+      require_directory(path: source, name: "Artifact Directory")
+      FileUtils.mkdir_p(destination)
+      FileUtils.cp_r(source, destination)
+    else
+      require_file(path: source, name: "Artifact File")
+      FileUtils.mkdir_p(File.dirname(destination))
+      FileUtils.cp(source, destination)
+    end
+
+    UI.success("Named artifact created: #{destination}")
+  end
+
+  # ===========================================================================
+  # App Store Connect API Key Context
+  # ===========================================================================
+
+  private_lane :get_app_store_connect_api_key do
+    validate_app_store_connect_configuration
+
+    key_content = if !asc_key_content.empty?
+      asc_key_content
+    else
+      require_file(path: asc_key_path, name: "App Store Connect Key File")
+      File.read(asc_key_path)
+    end
+
+    unless key_content.include?("BEGIN PRIVATE KEY")
+      UI.user_error!("App Store Connect API key content is missing standard PEM private key header.")
+    end
+
+    app_store_connect_api_key(
+      key_id: asc_key_id,
+      issuer_id: asc_issuer_id,
+      key_content: key_content,
+      is_key_content_base64: false,
+      in_house: false
     )
-    UI.success("CocoaPods dependencies installed.")
   end
 
-  private_lane :clean_builds do
-    UI.message("Cleaning builds...")
-    sh "flutter clean"
-    sh "flutter pub get"
+  # ===========================================================================
+  # Environment Validation Helpers
+  # ===========================================================================
+
+  private_lane :validate_flutter_environment do
+    UI.message("Validating Flutter build environment...")
+
+    %w[flutter dart git].each do |command|
+      require_command(command: command)
+    end
+
+    UI.success("Flutter build environment validation passed.")
   end
 
-  private_lane :scan_for_secrets do
-    # git-secrets is used to detect secrets
-    sh "git secrets --scan"
-    UI.message("No secrets detected in code")
-  rescue => e
-    UI.user_error!("Secrets detected in code: #{e.message}")
+  private_lane :validate_ios_environment do
+    validate_flutter_environment
+    UI.message("Validating iOS build environment...")
+
+    require_command(command: "xcodebuild")
+
+    UI.success("iOS build environment validation passed.")
   end
 
-  private_lane :audit_dependencies do
-    UI.message("Auditing Flutter dependencies...")
+  private_lane :validate_build_version do
+    UI.message("Validating application version...")
 
-    # Check unknown vulnerabilities
-    sh "flutter pub deps --style=compact"
+    if build_name.empty?
+      UI.user_error!("BUILD_NAME is required.")
+    end
+
+    if build_number.empty?
+      UI.user_error!("BUILD_NUMBER is required.")
+    end
+
+    unless build_name.match?(/\A\d+\.\d+(\.\d+)?\z/)
+      UI.user_error!("BUILD_NAME must be standard numeric versioning (e.g. 1.0.0 or 1.0). Pre-release suffixes are rejected by App Store Connect. Received: #{build_name}")
+    end
+
+    unless build_number.match?(/\A\d+\z/)
+      UI.user_error!("BUILD_NUMBER must contain only digits. Received: #{build_number}")
+    end
+
+    UI.message("Version: #{build_name} (#{build_number})")
   end
 
-  private_lane :check_dependencies do
-    UI.message("Checking dependencies...")
+  private_lane :validate_xcode_project do
+    require_directory(path: XCODEPROJ_PATH, name: "Xcode project")
+    require_directory(path: XCODE_WORKSPACE_PATH, name: "Xcode workspace")
+    UI.success("Xcode project validation passed.")
+  end
 
-    sh "flutter pub get"
+  private_lane :validate_flutter_configuration do
+    require_file(path: "pubspec.yaml", name: "pubspec.yaml")
 
-    # Verify dependency integrity
-    sh "dart analyze --fatal-infos ."
+    lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
+    if File.exist?(lockfile_path)
+      UI.success("pubspec.lock detected — dependency versions pinned.")
+    else
+      UI.important("pubspec.lock not found — dependency versions may be unpinned.")
+    end
 
-    UI.message("Dependency status checked")
+    podfile_path = File.join(IOS_PROJECT_DIR, "Podfile")
+    if File.exist?(podfile_path)
+      UI.success("Podfile detected — CocoaPods in use.")
+    else
+      UI.message("No Podfile detected — assuming SPM or no native deps.")
+    end
+
+    UI.success("Flutter configuration validation passed.")
+  end
+
+  private_lane :validate_app_store_connect_configuration do
+    UI.message("Validating App Store Connect API Key configuration...")
+
+    if asc_key_id.empty?
+      UI.user_error!("APP_STORE_CONNECT_KEY_ID is required.")
+    end
+
+    if asc_issuer_id.empty?
+      UI.user_error!("APP_STORE_CONNECT_ISSUER_ID is required.")
+    end
+
+    if asc_key_content.empty? && asc_key_path.empty?
+      UI.user_error!("Configure APP_STORE_CONNECT_KEY_CONTENT or APP_STORE_CONNECT_KEY_PATH.")
+    end
+
+    UI.success("App Store Connect configuration validation passed.")
+  end
+
+  # ===========================================================================
+  # Swift Package Manager Validation
+  # ===========================================================================
+
+  private_lane :validate_swift_package_manager do
+    UI.message("Validating Swift Package Manager configuration...")
+
+    package_resolved_paths = [
+      File.join(IOS_PROJECT_DIR, "Runner.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
+      File.join(IOS_PROJECT_DIR, "Runner.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved")
+    ]
+
+    package_resolved = package_resolved_paths.find { |path| File.exist?(path) }
+
+    if package_resolved
+      require_command(command: "swift")
+      UI.message("Swift Package Manager lockfile detected: #{package_resolved}")
+    else
+      UI.important("No Package.resolved file detected. Skipping SPM tool check.")
+    end
+
+    UI.success("Swift Package Manager validation completed.")
+  end
+
+  # ===========================================================================
+  # Firebase App Distribution Validation
+  # ===========================================================================
+
+  private_lane :validate_firebase_configuration do
+    UI.message("Validating Firebase App Distribution configuration...")
+
+    if firebase_app_id.empty?
+      UI.user_error!("FIREBASE_APP_ID is required for Firebase App Distribution.")
+    end
+
+    unless firebase_app_id.include?(":ios:")
+      UI.user_error!("FIREBASE_APP_ID does not appear to be an iOS Firebase App ID: #{firebase_app_id}")
+    end
+
+    if FIREBASE_GROUPS.to_s.strip.empty? && firebase_testers.empty?
+      UI.user_error!("Configure at least one Firebase tester group or tester email.")
+    end
+
+    if firebase_service_credentials.empty?
+      UI.user_error!("Configure FIREBASE_SERVICE_CREDENTIALS_FILE or GOOGLE_APPLICATION_CREDENTIALS.")
+    end
+
+    require_file(path: firebase_service_credentials, name: "Firebase service-account credentials")
+
+    UI.success("Firebase App Distribution configuration passed.")
+  end
+
+  # ===========================================================================
+  # Quality & Static Verification
+  # ===========================================================================
+
+  private_lane :install_flutter_dependencies do
+    UI.message("Installing Flutter dependencies...")
+    sh("flutter", "pub", "get")
+    UI.success("Flutter dependencies installed.")
+  end
+
+  private_lane :check_formatting do
+    UI.message("Checking Dart formatting...")
+    sh("dart", "format", "--output=none", "--set-exit-if-changed", ".")
+    UI.success("Dart formatting validation passed.")
   end
 
   private_lane :run_code_analysis do
-    UI.message("Running code analysis...")
+    UI.message("Running Flutter static analysis...")
+    sh("flutter", "analyze")
+    UI.success("Flutter analysis passed.")
+  end
 
-    sh "flutter analyze"
-
-    sh "dart analyze --fatal-infos ."
-
-    UI.message("Code analysis passed")
+  private_lane :run_tests do
+    UI.message("Running Flutter tests...")
+    sh("flutter", "test")
+    UI.success("Flutter tests passed.")
   end
 
   private_lane :run_tests_with_coverage do
-    UI.message("Running tests with coverage...")
-    sh "flutter test --coverage"
-
-    UI.message("Tests passed")
+    UI.message("Running Flutter tests with coverage...")
+    sh("flutter", "test", "--coverage")
+    require_file(path: "coverage/lcov.info", name: "Flutter coverage report")
+    UI.success("Flutter coverage generated.")
   end
 
-  private_lane :flutter_test do
+  # ===========================================================================
+  # Build Lanes — Simulator & Debug
+  # ===========================================================================
+
+  private_lane :build_simulator_artifact do
+    UI.message("Building Flutter iOS Simulator application...")
+    prepare_fastlane_directories
+
+    cmd = [
+      "flutter", "build", "ios",
+      "--simulator",
+      "--debug",
+      "--no-codesign",
+      "--build-name=#{build_name}",
+      "--build-number=#{build_number}"
+    ] + dart_define_args
+
+    sh(*cmd)
+
+    validate_artifact(path: SIMULATOR_APP_PATH, name: "iOS Simulator application")
+    UI.success("iOS Simulator build completed.")
+  end
+
+  private_lane :build_debug_device_artifact do
+    UI.message("Building Flutter iOS Debug device application...")
+    prepare_fastlane_directories
+
+    cmd = [
+      "flutter", "build", "ios",
+      "--debug",
+      "--build-name=#{build_name}",
+      "--build-number=#{build_number}"
+    ] + dart_define_args
+
+    sh(*cmd)
+
+    validate_artifact(path: DEBUG_APP_PATH, name: "iOS Debug device application")
+    UI.success("iOS Debug device build completed.")
+  end
+
+  # ===========================================================================
+  # Build Lanes — Firebase Ad Hoc & Signed App Store IPA
+  # ===========================================================================
+
+  private_lane :build_firebase_ipa_artifact do
+    get_app_store_connect_api_key
+
+    UI.message("Building Firebase App Distribution Ad Hoc IPA...")
+    prepare_fastlane_directories
+
+    cmd = [
+      "flutter", "build", "ipa",
+      "--release",
+      "--obfuscate",
+      "--split-debug-info=#{DEBUG_INFO_DIRECTORY}",
+      "--build-name=#{build_name}",
+      "--build-number=#{build_number}",
+      "--export-method=ad-hoc",
+      "--build-dir=#{FIREBASE_OUTPUT_DIR}"
+    ] + dart_define_args
+
+    sh(*cmd)
+
+    validate_artifact(path: FIREBASE_ARCHIVE_PATH, name: "Firebase Ad Hoc Xcode archive")
+    validate_artifact(path: FIREBASE_IPA_PATH, name: "Firebase Ad Hoc IPA")
+
+    firebase_named_ipa = File.join(
+      FIREBASE_OUTPUT_DIR,
+      "ios",
+      "ipa",
+      artifact_filename(
+        extension: "ipa",
+        platform: "ios",
+        flavor: "firebase",
+        signed: true
+      )
+    )
+
+    copy_artifact(source: FIREBASE_IPA_PATH, destination: firebase_named_ipa)
+    UI.success("Firebase App Distribution IPA created: #{firebase_named_ipa}")
+  end
+
+  private_lane :build_appstore_ipa_artifact do
+    get_app_store_connect_api_key
+
+    UI.message("Building signed App Store IPA...")
+    prepare_fastlane_directories
+
+    cmd = [
+      "flutter", "build", "ipa",
+      "--release",
+      "--obfuscate",
+      "--split-debug-info=#{DEBUG_INFO_DIRECTORY}",
+      "--build-name=#{build_name}",
+      "--build-number=#{build_number}",
+      "--export-method=app-store"
+    ] + dart_define_args
+
+    sh(*cmd)
+
+    validate_artifact(path: RELEASE_ARCHIVE_PATH, name: "iOS Xcode archive")
+    validate_artifact(path: RELEASE_IPA_PATH, name: "Signed App Store IPA")
+
+    release_named_ipa = File.join(
+      File.dirname(RELEASE_IPA_PATH),
+      artifact_filename(
+        extension: "ipa",
+        platform: "ios",
+        flavor: "appstore",
+        signed: true
+      )
+    )
+
+    copy_artifact(source: RELEASE_IPA_PATH, destination: release_named_ipa)
+    UI.success("Signed App Store IPA created: #{release_named_ipa}")
+  end
+
+  # ===========================================================================
+  # Artifact Validation & Manifest Helpers
+  # ===========================================================================
+
+  private_lane :validate_simulator_artifact do
+    validate_artifact(path: SIMULATOR_APP_PATH, name: "Simulator .app")
+  end
+
+  private_lane :validate_debug_artifact do
+    validate_artifact(path: DEBUG_APP_PATH, name: "Debug device .app")
+  end
+
+  private_lane :validate_firebase_artifact do
+    validate_artifact(path: FIREBASE_IPA_PATH, name: "Firebase App Distribution IPA")
+    validate_artifact(path: FIREBASE_ARCHIVE_PATH, name: "Firebase App Distribution archive")
+  end
+
+  private_lane :validate_release_artifact do
+    validate_artifact(path: RELEASE_IPA_PATH, name: "App Store IPA")
+    validate_artifact(path: RELEASE_ARCHIVE_PATH, name: "App Store archive")
+  end
+
+  private_lane :generate_build_manifest do |options|
+    options ||= {}
+    prepare_fastlane_directories
+    artifacts = {}
+
+    [SIMULATOR_APP_PATH, DEBUG_APP_PATH, FIREBASE_IPA_PATH, FIREBASE_ARCHIVE_PATH, RELEASE_IPA_PATH, RELEASE_ARCHIVE_PATH].each do |path|
+      next unless File.exist?(path)
+
+       # Convert absolute path to a clean relative path from PROJECT_ROOT
+      rel_path = Pathname.new(path).relative_path_from(Pathname.new(PROJECT_ROOT)).to_s
+
+      if File.file?(path)
+        artifacts[rel_path] = {
+          "type"       => "file",
+          "size_bytes" => File.size(path),
+          "sha256"     => Digest::SHA256.file(path).hexdigest
+        }
+      else
+        files = Dir.glob(File.join(path, "**", "*")).select { |item| File.file?(item) }
+        artifacts[rel_path] = {
+          "type"       => "directory",
+          "file_count" => files.length,
+          "size_bytes" => files.map { |file| File.size(file) }.reduce(0, :+)
+        }
+      end
+    end
+
+    if artifacts.empty?
+      UI.user_error!("No build artifacts found.")
+    end
+
+    lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
+
+    manifest = {
+      "platform"             => "ios",
+      "build_name"           => build_name,
+      "build_number"         => build_number,
+      "bundle_identifier"    => app_identifier,
+      "build_flavor"         => options[:flavor] || ENV.fetch("BUILD_FLAVOR", "dev"),
+      "build_type"           => options[:build_type] || ENV.fetch("BUILD_TYPE", "release"),
+      "dependency_lock_hash" => File.exist?(lockfile_path) ? Digest::SHA256.file(lockfile_path).hexdigest[0..11] : "no-lockfile",
+      "os_target"            => ENV.fetch("OS_TARGET", "ios-arm64"),
+      "signing_certificate"  => ENV.fetch("SIGNING_CERTIFICATE", "Apple Development/Automatic"),
+      "device_compatibility" => ENV.fetch("DEVICE_COMPATIBILITY", "iOS 14.0+"),
+      "git_sha"              => git_commit_sha,
+      "git_branch"           => git_branch_name,
+      "build_timestamp"      => Time.now.utc.iso8601,
+      "flutter_version"      => flutter_version_info,
+      "xcode_version"        => xcode_version_info,
+      "artifacts"            => artifacts
+    }
+
+    # Optional API URL backported from Android pattern
+    base_url = api_base_url
+    manifest["api_base_url"] = base_url unless base_url.empty?
+
+    File.write(BUILD_MANIFEST_FILE, JSON.pretty_generate(manifest) + "\n")
+    UI.success("Build manifest generated: #{BUILD_MANIFEST_FILE}")
+  end
+
+  private_lane :read_release_notes do |options|
+    options ||= {}
+    max_length = options[:max_length] || 4000
+
+    notes = if File.exist?(RELEASE_NOTES_FILE)
+      content = File.read(RELEASE_NOTES_FILE).strip
+      content.empty? ? "Bug fixes and improvements." : content
+    else
+      "Bug fixes and improvements."
+    end
+
+    # Truncate clean at last whitespace boundary before max_length
+    if notes.length > max_length
+      truncated = notes[0..(max_length - 4)]
+      space_index = truncated.rindex(/\s/)
+      truncated = truncated[0..space_index].strip if space_index
+      notes = "#{truncated}..."
+    end
+
+    notes
+  end
+
+  # ===========================================================================
+  # Publish Lanes (Pure Distribution — Consumes Existing Artifacts)
+  # ===========================================================================
+
+  private_lane :publish_firebase do
+    validate_firebase_artifact
+    validate_firebase_configuration
+
+    UI.message("Uploading existing IPA to Firebase App Distribution...")
+
+    groups  = FIREBASE_GROUPS.to_s.strip
+    testers = firebase_testers.to_s.strip
+
+    if groups.empty? && testers.empty?
+      UI.user_error!("At least one tester group or tester email must be configured.")
+    end
+
+    parameters = {
+      app: firebase_app_id,
+      ipa_path: File.expand_path(FIREBASE_IPA_PATH),
+      release_notes: read_release_notes(max_length: 500),
+      service_credentials_file: firebase_service_credentials
+    }
+
+    parameters[:groups] = groups unless groups.empty?
+    parameters[:testers] = testers unless testers.empty?
+
+    firebase_app_distribution(**parameters)
+    UI.success("Existing IPA uploaded to Firebase App Distribution.")
+  end
+
+  private_lane :publish_testflight do
+    validate_release_artifact
+
+    UI.message("Uploading existing IPA to TestFlight...")
+
+    upload_to_testflight(
+      ipa: RELEASE_IPA_PATH,
+      api_key: get_app_store_connect_api_key,
+      skip_waiting_for_build_processing: ENV.fetch("TESTFLIGHT_SKIP_WAIT", "true") == "true",
+      changelog: read_release_notes(max_length: 4000)
+    )
+
+    UI.success("Existing IPA uploaded to TestFlight.")
+  end
+
+  private_lane :publish_appstore do
+    validate_release_artifact
+
+    UI.message("Uploading existing IPA to App Store Connect...")
+
+    # Namespaced env var lookup with legacy fallback
+    skip_metadata = ENV["IOS_SKIP_METADATA"] || ENV["SKIP_METADATA"] || "true"
+    skip_screenshots = ENV["IOS_SKIP_SCREENSHOTS"] || ENV["SKIP_SCREENSHOTS"] || "true"
+
+    upload_to_app_store(
+      ipa: RELEASE_IPA_PATH,
+      api_key: get_app_store_connect_api_key,
+      skip_binary_upload: false,
+      skip_metadata: skip_metadata.to_s == "true",
+      skip_screenshots: skip_screenshots.to_s == "true",
+      submit_for_review: ENV.fetch("SUBMIT_FOR_REVIEW", "false") == "true",
+      automatic_release: ENV.fetch("AUTOMATIC_RELEASE", "false") == "true",
+      force: ENV["CI"] == "true"
+    )
+
+    UI.success("Existing IPA uploaded to App Store Connect.")
+  end
+
+  private_lane :submit_existing_build do |options|
+    options ||= {}
+    target_build_number = options[:build_number] || build_number
+
+    if target_build_number.empty?
+      UI.message("No build number supplied. Fastlane will select the latest eligible build.")
+    else
+      UI.message("Submitting existing App Store Connect build #{target_build_number}.")
+    end
+
+    skip_metadata = ENV["IOS_SKIP_METADATA"] || ENV["SKIP_METADATA"] || "true"
+    skip_screenshots = ENV["IOS_SKIP_SCREENSHOTS"] || ENV["SKIP_SCREENSHOTS"] || "true"
+
+    parameters = {
+      app_identifier: app_identifier,
+      api_key: get_app_store_connect_api_key,
+      submit_for_review: true,
+      automatic_release: ENV.fetch("AUTOMATIC_RELEASE", "false") == "true",
+      skip_binary_upload: true,
+      skip_metadata: skip_metadata.to_s == "true",
+      skip_screenshots: skip_screenshots.to_s == "true",
+      force: ENV["CI"] == "true"
+    }
+
+    parameters[:build_number] = target_build_number unless target_build_number.empty?
+    parameters[:app_version]  = build_name unless build_name.empty?
+    parameters[:team_id]      = team_id unless team_id.empty?
+    parameters[:apple_id]     = apple_id unless apple_id.empty?
+
+    upload_to_app_store(**parameters)
+    UI.success("Existing App Store Connect build submitted for review.")
+  end
+
+  # ===========================================================================
+  # Public Lanes — Quality & Static Verification
+  # ===========================================================================
+
+  desc "Check Dart formatting"
+  lane :format do
+    validate_flutter_environment
+    install_flutter_dependencies
+    check_formatting
+  end
+
+  desc "Run Flutter static analysis"
+  lane :analyze do
+    validate_flutter_environment
+    install_flutter_dependencies
+    run_code_analysis
+  end
+
+  desc "Run Flutter tests"
+  lane :test do
+    validate_flutter_environment
+    install_flutter_dependencies
+    run_tests
+  end
+
+  desc "Run Flutter tests with coverage"
+  lane :coverage do
+    validate_flutter_environment
+    install_flutter_dependencies
     run_tests_with_coverage
   end
 
-  # desc "Run Flutter integration tests"
-  # private_lane :flutter_integration_test do
-  #   UI.message("Running Flutter integration tests...")
-  #   sh "flutter test integration_test"
-  #   UI.success("Flutter integration tests finished successfully.")
+  desc "Run complete Flutter quality verification"
+  lane :quality do
+    validate_flutter_environment
+    install_flutter_dependencies
+    check_formatting
+    run_code_analysis
+    run_tests
+  end
+
+  # ===========================================================================
+  # Public Lanes — Validation
+  # ===========================================================================
+
+  desc "Validate iOS build environment and App Store Connect credentials"
+  lane :validate do
+    validate_ios_environment
+    validate_build_version
+    validate_flutter_configuration
+    validate_xcode_project
+    validate_swift_package_manager
+    validate_app_store_connect_configuration
+  end
+
+  desc "Validate Firebase App Distribution configuration"
+  lane :validate_firebase do
+    validate_ios_environment
+    validate_build_version
+    validate_flutter_configuration
+    validate_xcode_project
+    validate_swift_package_manager
+    validate_app_store_connect_configuration
+    validate_firebase_configuration
+  end
+
+  # ===========================================================================
+  # Public Lanes — BUILD LANES (Generates Artifacts Only)
+  # ===========================================================================
+
+  desc "Build iOS Simulator application"
+  lane :build_simulator do |options|
+    validate_ios_environment
+    validate_build_version
+    validate_flutter_configuration
+    validate_xcode_project
+    validate_swift_package_manager
+
+    install_flutter_dependencies
+    build_simulator_artifact
+    generate_build_manifest(dev, debug)
+  end
+
+  desc "Build iOS Debug device application"
+  lane :build_debug do |options|
+    validate_ios_environment
+    validate_build_version
+    validate_flutter_configuration
+    validate_xcode_project
+    validate_swift_package_manager
+
+    install_flutter_dependencies
+    build_debug_device_artifact
+    generate_build_manifest(dev, debug)
+  end
+
+  desc "Build Firebase App Distribution Ad Hoc IPA"
+  lane :build_firebase do |options|
+    validate_ios_environment
+    validate_build_version
+    validate_flutter_configuration
+    validate_xcode_project
+    validate_swift_package_manager
+    validate_app_store_connect_configuration
+
+    install_flutter_dependencies
+    build_firebase_ipa_artifact
+    generate_build_manifest(dev, debug)
+
+    UI.success("Firebase App Distribution build artifact generated successfully.")
+  end
+
+  desc "Build signed App Store IPA"
+  lane :build_release do |options|
+    validate_ios_environment
+    validate_build_version
+    validate_flutter_configuration
+    validate_xcode_project
+    validate_swift_package_manager
+    validate_app_store_connect_configuration
+
+    install_flutter_dependencies
+    build_appstore_ipa_artifact
+    generate_build_manifest(production, release)
+  end
+
+  desc "Build Simulator, Debug device, Firebase Ad Hoc IPA and signed App Store IPA"
+  lane :build_all do |options|
+    validate_ios_environment
+    validate_build_version
+    validate_flutter_configuration
+    validate_xcode_project
+    validate_swift_package_manager
+    validate_app_store_connect_configuration
+
+    install_flutter_dependencies
+    build_simulator_artifact
+    build_debug_device_artifact
+    build_firebase_ipa_artifact
+    build_appstore_ipa_artifact
+
+    generate_build_manifest(production, release)
+
+    UI.success("All iOS build artifacts generated successfully.")
+  end
+
+  # ===========================================================================
+  # Public Lanes — Artifact Validation
+  # ===========================================================================
+
+  desc "Validate existing iOS Simulator artifact"
+  lane :validate_simulator do
+    validate_simulator_artifact
+  end
+
+  desc "Validate existing iOS Debug artifact"
+  lane :validate_debug do
+    validate_debug_artifact
+  end
+
+  desc "Validate existing Firebase App Distribution IPA"
+  lane :validate_firebase_artifact do
+    validate_firebase_artifact
+  end
+
+  desc "Validate existing App Store IPA"
+  lane :validate_release do
+    validate_release_artifact
+  end
+
+  # desc "Generate build manifest for existing iOS artifacts"
+  # lane :build_manifest do |options|
+  #   generate_build_manifest(options)
   # end
 
-  # Private lane to build iOS app with Flutter
-  # Options:
-  # :flavor (String): The Flutter flavor (e.g., "prod", "dev"). Defaults to "prod"
-  # :export_method (String): The Xcode export method (e.g., "development", "app-store", "ad-hoc", "enterprise"). Defaults to "development"
-  # :build_number (String): The build number for the archive. Required
-  private_lane :flutter_build_ios do |options|
-    clean_builds
+  # ===========================================================================
+  # Public Lanes — PUBLISH LANES (Consumes Artifacts Only — NEVER Builds)
+  # ===========================================================================
 
-    flavor = options[:flavor] || "prod"
-    export_method = options[:export_method] || "development"
-    build_number = options[:build_number] || BUILD_NUMBER
-    scheme = (flavor == "prod") ? "Runner" : "Runner-#{flavor}"
-
-    # unless ENV["APP_IDENTIFIER"] && ENV["PROVISIONING_PROFILE_NAME"]
-    #   UI.user_error!("APP_IDENTIFIER and PROVISIONING_PROFILE_NAME must be set in your environment variables.")
-    # end
-
-    UI.message("Building Flutter iOS app with flavor #{flavor}, export method: #{export_method}, Build number: #{build_number}...")
-    # Build the Flutter iOS app (no codesign as gym will handle it)
-    sh("flutter build ios --#{flavor} --release --obfuscate --split-debug-info=ios/debug-info --dart-define-from-file=.env --build-number=#{build_number} --no-codesign")
-
-    # Build the Xcode archive using gym
-    gym(
-      workspace: XCODE_WORKSPACE_PATH,
-      scheme: scheme,
-      clean: true,
-      export_method: export_method,
-      output_directory: OUTPUT_DIR,
-      output_name: "#{flavor}_#{build_number}.ipa", # Include build number in output name
-      # When using match, gym usually picks up the correct provisioning profile automatically
-      # You can explicitly specify provisioningProfiles if needed, but match simplifies this.
-      export_options: {
-        provisioningProfiles: {
-          ENV["APP_IDENTIFIER"] => ENV["PROVISIONING_PROFILE_NAME"]
-          # e.g., "com.yourcompany.yourapp" => "match AppStore com.yourcompany.yourapp"
-        }
-      }
-    )
-
-    UI.success("iOS app built successfully. to #{File.join(OUTPUT_DIR, "#{flavor}_#{build_number}.ipa")}")
+  desc "Upload existing Firebase IPA — NEVER builds"
+  lane :firebase do
+    validate_firebase_artifact
+    publish_firebase
   end
 
-  # Build the iOS app in debug mode
-  desc "Build the iOS app in debug (development) mode"
-  lane :build_debug do
-    current_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
-    UI.message("Debug build: current build number set to #{current_build_number}")
-
-    # Ensure development match profiles are available if not done before_all
-    match(type: "development", git_url: ENV["MATCH_GIT_URL"], readonly: is_ci?)
-
-    flutter_build_ios(
-      flavor: "dev",
-      export_method: "development",
-      build_number: current_build_number
-    )
-  end
-
-  # Build the iOS app in release mode
-  desc "Build the iOS app in release (App Store) mode"
-  lane :build_release do
-    current_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
-    UI.message("Release build: current build number set to #{current_build_number}")
-
-    # Ensure appstore match profiles are available if not done before_all
-    match(type: "appstore", git_url: ENV["MATCH_GIT_URL"], readonly: is_ci?)
-
-    flutter_build_ios(
-      flavor: "prod",
-      export_method: "app-store",
-      build_number: current_build_number
-    )
-  end
-
-  desc "Submit a new beta build to TestFlight"
+  desc "Upload existing IPA to TestFlight — NEVER builds"
   lane :beta do
-    # Get the latest build number and increment it for the new Build
-    # Handle the case where there are no previous TestFlight builds
-    begin
-      next_build_number = latest_testflight_build_number(xcodeproj: XCODEPROJ_PATH) + 1
-    rescue
-      UI.warning("Could not determine latest TestFlight build number: #{next_build_number}")
-      next_build_number = 1 # Start from 1 if no existing builds are found
-    end
-
-    UI.message("Preparing to submit to TestFlight with build number: #{next_build_number}")
-
-    # Increment the build number in Xcode project (optional can be dione by gym/flutter build if passed correctly)
-    # This ensures the .xcodeproj file also reflects the build number.
-
-    increment_build_number(
-      build_number: next_build_number,
-      xcodeproj: XCODEPROJ_PATH
-    )
-
-    # Build the release version of the app
-    # The `flutter_build_ios` lane will use the `next_build_number`
-    flutter_build_ios(
-      flavor: "prod",
-      export_method: "app-store", # TestFlight builds usually use "app-store" export method
-      build_number: next_build_number
-    )
-
-    # Upload to TestFlight
-    upload_to_testflight(
-      skip_waiting_for_build_processing: true, # Speeds up the lane execution
-      # TODO:
-      apple_id: ENV["APPLE_ID"], # e.g., "your_apple_id@email.com"
-      team_id: ENV["TEAM_ID"] # "YOUR_TEAM_ID"
-      # groups: ["testers"], Optional: Specify tester groups
-      # changelog: "Beta build for testing." # Optional: Add a changelog message
-    )
-    UI.success("Successfully uploaded new beta build to TestFlight!")
+    validate_release_artifact
+    validate_app_store_connect_configuration
+    publish_testflight
   end
 
-  # Deploy to App Store
-  desc "Deploy a new version to the App Store"
-  lane :deploy do
-    # TODO: `fastlane deliver` to upload metadata
-    # Increment version number (you might want to use semantic versioning)
-    increment_version_number(
-      version_number: BUILD_NAME, # TODO: Replace with your versioning logic
-      xcodeproj: XCODEPROJ_PATH
-    )
-    # Build the release
-    build_release
-    # Upload to the App Store Connect
-    upload_to_app_store(
-      skip_metadata: true, # TODO: 
-      skip_screenshots: true,
-      apple_id: ENV["APPLE_ID"], # e.g., "your_apple_id@email.com"
-      team_id: ENV["TEAM_ID"] # "YOUR_TEAM_ID"
-    )
+  desc "Upload existing IPA to App Store Connect (skips metadata/screenshots by default via IOS_SKIP_METADATA/IOS_SKIP_SCREENSHOTS) — NEVER builds"
+  lane :appstore do
+    validate_release_artifact
+    validate_app_store_connect_configuration
+    publish_appstore
   end
 
-  desc "Description of what the lane does"
-  lane :custom_lane do
-    # add actions here: https://docs.fastlane.tools/actions
+  desc "Submit an already uploaded App Store Connect build for review (assumes metadata already exists on ASC)"
+  lane :submit_review do |options|
+    validate_app_store_connect_configuration
+    submit_existing_build(build_number: options[:build_number])
   end
 
-  after_all do
-    puts "Fastlane finished successfully!"
+  # ===========================================================================
+  # Public Lanes — Complete Release Workflows
+  # ===========================================================================
+
+  desc "Build all iOS artifacts"
+  lane :build do
+    build_all
+  end
+
+  # ===========================================================================
+  # Diagnostics
+  # ===========================================================================
+
+  desc "Show Flutter/Xcode diagnostics"
+  lane :doctor do
+    validate_ios_environment
+
+    sh("flutter", "--version")
+    sh("dart", "--version")
+    sh("xcodebuild", "-version")
+    sh("xcodebuild", "-showsdks")
+    sh("flutter", "doctor", "-v")
+  end
+
+  # ===========================================================================
+  # Fastlane Lifecycle
+  # ===========================================================================
+
+  after_all do |lane|
+    UI.message("Fastlane lane `#{lane}` finished execution.")
   end
 
   error do |lane, exception|
-    UI.error("Error in lane: #{lane}")
+    UI.error("Fastlane lane `#{lane}` failed.")
     UI.error(exception.message)
   end
-end
 
-# TODO: https://gemini.google.com/app/b4d2abe82796dd0e
+end

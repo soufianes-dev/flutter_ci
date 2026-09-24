@@ -27,7 +27,7 @@ keytool -genkey -v -keystore ~upload-keystore.jks -keyalg RSA -keysize 2048 -val
 
 
 # https://console.cloud.google.com/apis/library/androidpublisher.googleapis.com?hl=en&inv=1&invt=Abrhmw&project=flutter-app1-d3af8
-fastlane run validate_play_store_json_key json_key:/home/soufiane/dev/projects/playground/dev_ops/flutter_ci/flutter-ci-432e4-b2e456c83eaa.json
+fastlane run validate_play_store_json_key json_key:/home/soufiane/dev/projects/playground/dev_ops/flutter_ci/flutter_ci-432e4-b2e456c83eaa.json
 (cd android && fastlane init)
 cd android && bundle exec fastlane add_plugin firebase_app_distribution
 
@@ -56,7 +56,7 @@ cd ios && fastlane <name of the lane>
 
 - [Flutter Fastlane](https://docs.flutter.dev/deployment/cd#fastlane)
 - [Fastlane](https://docs.fastlane.tools/)
-- [flutter-ci-cd-using-github-actions](https://blog.logrocket.com/flutter-ci-cd-using-github-actions/)
+- [flutter_ci-cd-using-github-actions](https://blog.logrocket.com/flutter_ci-cd-using-github-actions/)
 - [Android command line tools](https://chat.openai.com/c/07e27afe-c623-4bb9-adb7-079f4ee01abb)
 - [Android publisher](https://developers.google.com/android-publisher)
 - [Internal testing](https://play.google.com/console/about/internal-testing/)
@@ -68,3 +68,17 @@ cd ios && fastlane <name of the lane>
 - <https://docs.flutter.dev/deployment/ios#create-an-app-bundle>
 -
 - IMPORTANT <https://chat.openai.com/share/17a4cb6d-4ef2-4791-8a32-547ebf51675e>
+
+---
+---
+---
+---
+---
+
+cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_PACKAGE_NAME="dev.soufianes.flutterci" bundle exec fastlane build_android_app
+
+cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_PACKAGE_NAME="dev.soufianes.flutterci" bundle exec fastlane build_android_apk
+
+cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_PACKAGE_NAME="dev.soufianes.flutterci" bundle exec fastlane build_all_android_artifacts
+
+cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_PACKAGE_NAME="dev.soufianes.flutterci" bundle exec fastlane build_manifest
