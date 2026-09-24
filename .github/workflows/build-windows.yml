@@ -200,8 +200,8 @@ jobs:
       - name: Upload MSIX package
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-msix-unsigned
           path: "${{ env.PREFIX }}-unsigned.msix"
+          archive: false
           retention-days: 30
           if-no-files-found: error
       - name: Upload debug symbols
@@ -304,8 +304,8 @@ jobs:
       - name: Upload Inno Installer
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-inno-installer
           path: "${{ env.PREFIX }}-setup-unsigned.exe"
+          archive: false
           retention-days: 30
           if-no-files-found: error
       - name: Install NSIS
@@ -412,8 +412,8 @@ jobs:
       - name: Upload NSIS Installer
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-nsis-installer
           path: "${{ env.PREFIX }}-installer-unsigned.exe"
+          archive: false
           retention-days: 30
           if-no-files-found: error
       - name: Install 7-Zip
@@ -462,8 +462,8 @@ jobs:
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-portable
           path: ${{ env.PREFIX }}-portable-unsigned.zip
+          archive: false
           retention-days: 30
           if-no-files-found: error
       - name: Generate build manifest
@@ -539,8 +539,8 @@ jobs:
       - name: Upload Windows build manifest
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-manifest
           path: windows_build_manifest.json
+          archive: false
           retention-days: 30
           if-no-files-found: error
 
