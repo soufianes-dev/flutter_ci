@@ -420,42 +420,45 @@ jobs:
         shell: pwsh
         run: |
           choco install 7zip -y --no-progress
-      - name: Package Windows
+      - name: Package Windows (Portable ZIP)
         shell: pwsh
         run: |
-          $Source = "build/windows/${{ matrix.arch }}/runner/Release"
-          $Dest = "${{ env.PREFIX }}-portable-unsigned.zip"
+          $ReleaseDir = "build/windows/${{ matrix.arch }}/runner/Release"
+          $ZipName = "${{ env.PREFIX }}-portable-unsigned.zip"
+          $DestPath = Join-Path (Get-Location) $ZipName
 
-          if (-Not (Test-Path $Source -PathType Container)) {
-            Write-Host "::error::Windows release directory not found: $Source"
+          if (-Not (Test-Path $ReleaseDir -PathType Container)) {
+            Write-Host "::error::Windows release directory not found: $ReleaseDir"
             exit 1
           }
 
-          $Files = Get-ChildItem -Path $Source -Force
+          $Files = @(Get-ChildItem -Path $ReleaseDir -Force)
 
           if ($Files.Count -eq 0) {
-            Write-Host "::error::Windows release directory is empty: $Source"
+            Write-Host "::error::Windows release directory is empty: $ReleaseDir"
             exit 1
           }
 
-          & 7z a `
-            -tzip `
-            -mx=9 `
-            $Dest `
-            "$Source\*"
-
+          # Switch context into the release directory so 7-Zip compresses files from the root
+          Push-Location $ReleaseDir
+          try {
+            & 7z a -tzip -mx=9 "$DestPath" "*"
+          } finally {
+            Pop-Location
+          }
+          
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::7-Zip failed to create package"
             exit 1
           }
 
 
-          if (-not (Test-Path $Dest -PathType Leaf)) {
-            Write-Host "::error::ZIP package was not created: $Dest"
+          if (-not (Test-Path $ZipName -PathType Leaf)) {
+            Write-Host "::error::ZIP package was not created: $ZipName"
             exit 1
           }
 
-          Write-Host "ZIP package created: $Dest"
+          Write-Host "Portable ZIP created successfully: $ZipName"
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
