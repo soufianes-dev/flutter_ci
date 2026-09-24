@@ -90,7 +90,7 @@ jobs:
             --release \
             --dart-define="BUILD_NAME=${{ env.BUILD_NAME }}" \
             --dart-define="BUILD_NUMBER=${{ env.BUILD_NUMBER }}" \
-            --dart-define="FLUTTER_VERSION=$flutterVersionStr" \
+            --dart-define="COMPILER_VERSION=$flutterVersionStr" \
             --dart-define="DART_VERSION=$dartVersionStr" \
             --dart-define="DEPENDENCY_LOCK_HASH=$lockHash" \
             --dart-define="BUILD_TIMESTAMP=$buildTimestamp" \
