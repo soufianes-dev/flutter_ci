@@ -29,11 +29,11 @@ jobs:
             flutter_arch: x64
             inno_archs_allowed: x64compatible
             inno_archs_install: x64compatible
-          - arch: arm64
-            runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
-            flutter_arch: arm64
-            inno_archs_allowed: arm64
-            inno_archs_install: arm64
+          # - arch: arm64
+          #   runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
+          #   flutter_arch: arm64
+          #   inno_archs_allowed: arm64
+          #   inno_archs_install: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -346,9 +346,8 @@ jobs:
           Unicode True
 
           ; ----- Modern UI settings -----
-          !define MUI_ABORTWARNING
-          !define MUI_ICON "$NSISDIR\Contrib\Graphics\Icons\modern-install.ico"
-          !define MUI_UNICON "$NSISDIR\Contrib\Graphics\Icons\modern-uninstall.ico"
+          !define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
+          !define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
 
           ; Optional: custom header/welcome bitmaps (place files in repo)
           ; !define MUI_HEADERIMAGE
