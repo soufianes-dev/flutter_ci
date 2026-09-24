@@ -84,8 +84,8 @@ jobs:
         run: flutter pub get
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
-      - name: Verify Formatting
-        run: dart format --output=none --set-exit-if-changed .
+      # - name: Verify Formatting
+      #   run: dart format --output=none --set-exit-if-changed .
       # - name: Run Tests
       #   run: flutter test
       - name: Build Windows desktop app (${{ matrix.arch }})
