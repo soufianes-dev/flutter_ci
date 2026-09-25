@@ -100,8 +100,7 @@ jobs:
           #cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
           #pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
           #pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-      - name: Cache pub dependencies
+          flutter-version: ${{ env.FLUTTER_VERSION }}      - name: Cache pub dependencies
         uses: actions/cache@v6
         with:
           path: |

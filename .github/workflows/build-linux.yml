@@ -102,7 +102,6 @@ jobs:
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          architecture: "${{ matrix.flutter_arch }}"
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
@@ -486,8 +485,8 @@ jobs:
       - name: Upload Debian build manifest
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-deb-manifest
           path: debian_build_manifest.json
+          archive: false
           retention-days: 30
           if-no-files-found: error
   build-RPM:
@@ -551,7 +550,6 @@ jobs:
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          architecture: "${{ matrix.flutter_arch }}"
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
@@ -723,9 +721,8 @@ jobs:
       - name: Upload RPM package
         uses: actions/upload-artifact@v7
         with:
+          path: rpmbuild/RPMS/${{ matrix.rpm_arch }}/*.rpm
           name: ${{ env.PREFIX }}-rpm
-          path: |
-            rpmbuild/RPMS/${{ matrix.rpm_arch }}/*.rpm
           retention-days: 30
           if-no-files-found: error
       - name: Generate rpm build manifest
@@ -814,7 +811,7 @@ jobs:
       - name: Upload RPM build manifest
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-rpm-manifest
           path: rpm_build_manifest.json
+          name: ${{ env.PREFIX }}-rpm
           retention-days: 30
           if-no-files-found: error

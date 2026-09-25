@@ -29,11 +29,11 @@ jobs:
             flutter_arch: x64
             inno_archs_allowed: x64compatible
             inno_archs_install: x64compatible
-          # - arch: arm64
-          #   runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
-          #   flutter_arch: arm64
-          #   inno_archs_allowed: arm64
-          #   inno_archs_install: arm64
+          - arch: arm64
+            runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
+            flutter_arch: arm64
+            inno_archs_allowed: arm64
+            inno_archs_install: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -69,7 +69,6 @@ jobs:
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          architecture: "${{ matrix.flutter_arch }}"
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
@@ -446,7 +445,7 @@ jobs:
           } finally {
             Pop-Location
           }
-          
+
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::7-Zip failed to create package"
             exit 1
