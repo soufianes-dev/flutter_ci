@@ -88,6 +88,12 @@ jobs:
       #   run: dart format --output=none --set-exit-if-changed .
       # - name: Run Tests
       #   run: flutter test
+      - name: Set up Java JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          architecture: ${{ matrix.arch }}
       - name: Build Windows desktop app (${{ matrix.arch }})
         shell: pwsh
         run: |
