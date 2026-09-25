@@ -69,6 +69,7 @@ jobs:
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
