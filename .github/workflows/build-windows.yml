@@ -24,11 +24,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: x64
-            runs-on: windows-2025-vs2026 # Windows Server 2025 with Visual Studio 2026
-            flutter_arch: x64
-            inno_archs_allowed: x64compatible
-            inno_archs_install: x64compatible
+          # - arch: x64
+          #   runs-on: windows-2025-vs2026 # Windows Server 2025 with Visual Studio 2026
+          #   flutter_arch: x64
+          #   inno_archs_allowed: x64compatible
+          #   inno_archs_install: x64compatible
           - arch: arm64
             runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
             flutter_arch: arm64
@@ -69,8 +69,14 @@ jobs:
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          architecture: x64
+          architecture: x64 # Force x64 Flutter SDK setup (x64 host cross-compiles both x64 & ARM64)
           cache: true
+      - name: Set up Java JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          architecture: ${{ matrix.arch }}
       - name: Cache pub dependencies
         uses: actions/cache@v6
         with:
@@ -88,12 +94,6 @@ jobs:
       #   run: dart format --output=none --set-exit-if-changed .
       # - name: Run Tests
       #   run: flutter test
-      - name: Set up Java JDK
-        uses: actions/setup-java@v6
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          architecture: ${{ matrix.arch }}
       - name: Build Windows desktop app (${{ matrix.arch }})
         shell: pwsh
         run: |
