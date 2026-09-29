@@ -80,7 +80,7 @@ jobs:
       #   run: dart format --output=none --set-exit-if-changed .
       # - name: Run Tests
       #   run: flutter test
-      - name: Build macOS desktop app (${{ env.ARCH }})
+      - name: Build macOS desktop app
         run: |
 
           lockfilePath="pubspec.lock"
