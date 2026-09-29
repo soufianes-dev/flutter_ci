@@ -61,7 +61,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
-          flutter-version: ${{ env.FLUTTER_VERSION }}          
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
@@ -140,7 +140,7 @@ jobs:
           test -d "$APP_PATH" || { echo "::error::App bundle not found"; exit 1; }
 
           DMG_ROOT="build/macos/dmg"
-          DMG_NAME="${{ env.APP_NAME }}-v${{ env.BUILD_NAME }}-build.${{ env.BUILD_NUMBER }}-macos-unsigned.dmg"
+          DMG_NAME="${{ env.PREFIX }}-unsigned.dmg"
           rm -rf "$DMG_ROOT" "$DMG_NAME"
           mkdir -p "$DMG_ROOT"
           # Copy application
@@ -156,6 +156,18 @@ jobs:
           echo "✅ Successfully Created DMG: $DMG_NAME"
 
           echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+      - name: Smoke-test DMG
+        run: |
+          set -euo pipefail
+          file "${{ env.DMG_NAME }}"
+          echo "✅ Package created"
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.DMG_NAME }}
+          archive: false
+          retention-days: 30
+          if-no-files-found: error
       - name: Package PKG
         run: |
           set -euo pipefail
@@ -164,7 +176,7 @@ jobs:
           test -d "$APP_PATH" || { echo "::error::App bundle not found"; exit 1; }
 
           PKG_ROOT="build/macos/pkg"
-          PKG_NAME="${{ env.APP_NAME }}-v${{ env.BUILD_NAME }}-build.${{ env.BUILD_NUMBER }}-macos-installer-unsigned.pkg"
+          PKG_NAME="${{ env.PREFIX }}-installer-unsigned.pkg"
           rm -rf "$PKG_ROOT" "$PKG_NAME"
           mkdir -p "$PKG_ROOT"
           cp -R "$APP_PATH" "$PKG_ROOT/"
@@ -177,19 +189,11 @@ jobs:
           echo "✅ Successfully Created PKG: $PKG_NAME"
 
           echo "PKG_NAME=$PKG_NAME" >> "$GITHUB_ENV"
-      - name: Smoke-test packages
+      - name: Smoke-test PKG
         run: |
           set -euo pipefail
-          file "${{ env.DMG_NAME }}"
           pkgutil --check-signature "${{ env.PKG_NAME }}" || true # unsigned is expected
-          echo "✅ Packages created"
-      - name: Upload DMG
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ env.DMG_NAME }}
-          archive: false
-          retention-days: 30
-          if-no-files-found: error
+          echo "✅ Package created"
       - name: Upload PKG
         uses: actions/upload-artifact@v7
         with:
