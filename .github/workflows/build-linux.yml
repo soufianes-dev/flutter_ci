@@ -48,13 +48,13 @@ jobs:
             appimagetool: appimagetool-x86_64.AppImage
             # https://github.com/AppImage/appimagetool/releases/tag/1.9.1
             appimagetool_sha256: "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
-          - arch: aarch64
-            runner: ubuntu-24.04-arm # native ARM runner
-            flutter_arch: arm64
-            deb_arch: arm64
-            appimagetool: appimagetool-aarch64.AppImage
-            # https://github.com/AppImage/appimagetool/releases/tag/1.9.1
-            appimagetool_sha256: "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
+          # - arch: aarch64
+          #   runner: ubuntu-24.04-arm # native ARM runner
+          #   flutter_arch: arm64
+          #   deb_arch: arm64
+          #   appimagetool: appimagetool-aarch64.AppImage
+          #   # https://github.com/AppImage/appimagetool/releases/tag/1.9.1
+          #   appimagetool_sha256: "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -83,7 +83,7 @@ jobs:
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
           echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
-          echo "PREFIX=${APP_NAME}-v${VERSION}-build.${BUILD}-linux-${{ matrix.arch }}" >> "$GITHUB_ENV"
+          echo "PREFIX=${APP_NAME}-v${VERSION}-build.${BUILD}-linux-${{ matrix.flutter_arch }}" >> "$GITHUB_ENV"
 
           echo "name=$APP_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -156,7 +156,7 @@ jobs:
             --dart-define="BUILD_TYPE=release" \
             --dart-define="BUILD_FLAVOR=production" \
             --obfuscate \
-            --split-debug-info=symbols/linux/${{ matrix.arch }} \
+            --split-debug-info=symbols/linux/${{ matrix.flutter_arch }} \
             --build-name=${{ env.BUILD_NAME }} \
             --build-number=${{ env.BUILD_NUMBER }} \
             --target lib/main.dart
@@ -164,14 +164,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.PREFIX }}-debug-symbols
-          path: symbols/linux/${{ matrix.arch }}
+          path: symbols/linux/${{ matrix.flutter_arch }}
           if-no-files-found: error
           retention-days: 30
       - name: Package Linux
         run: |
           set -euo pipefail
 
-          SOURCE="build/linux/${{ matrix.arch }}/release/bundle"
+          SOURCE="build/linux/${{ matrix.flutter_arch }}/release/bundle"
           DEST="${{ env.PREFIX }}.tar.gz"
 
           if [ ! -d "$SOURCE" ]; then exit 1; fi
@@ -206,7 +206,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          BUNDLE_DIR="build/linux/${{ matrix.arch }}/release/bundle"
+          BUNDLE_DIR="build/linux/${{ matrix.flutter_arch }}/release/bundle"
           if [[ ! -d "$BUNDLE_DIR" ]]; then
             echo "::error::Flutter bundle not found at $BUNDLE_DIR"
             exit 1
@@ -245,7 +245,7 @@ jobs:
           EOF
 
           # ARCH is used by appimagetool to select the correct runtime
-          export ARCH=${{ matrix.arch }}
+          export ARCH=${{ matrix.flutter_arch }}
           # Build AppImage
           APPIMAGE_NAME="${{ env.PREFIX }}.AppImage"
           appimagetool --no-appstream "$APPDIR" "$APPIMAGE_NAME"
@@ -303,7 +303,7 @@ jobs:
           Source: ${DEB_PKG_NAME}
           Package: ${DEB_PKG_NAME}
           Architecture: ${{ matrix.deb_arch }}
-          Description: Flutter Linux application ${{ matrix.arch }}
+          Description: Flutter Linux application ${{ matrix.flutter_arch }}
           EOF
 
           APP_BINARY="${{ env.PREFIX }}/usr/lib/${DEB_PKG_NAME}/${{ env.APP_NAME }}"
@@ -339,7 +339,7 @@ jobs:
           Architecture: ${{ matrix.deb_arch }}
           Maintainer: ${{ env.APP_PUBLISHER }} <soufianes.pro@gmail.com>
           Depends: $SHLIBS_DEPENDS
-          Description: Flutter Linux application ${{ matrix.arch }}
+          Description: Flutter Linux application ${{ matrix.flutter_arch }}
           Section: utils
           Priority: optional
           EOF
@@ -363,7 +363,7 @@ jobs:
             "usr/share/icons/hicolor/256x256/apps/${{ env.DEB_PKG_NAME }}.png"
 
           dpkg-deb -I "${{ env.DEB_NAME }}"
-          echo "✅ Packages look valid ${{ matrix.arch }}"
+          echo "✅ Packages look valid ${{ matrix.flutter_arch }}"
       - name: Smoke-test Debian package
         run: |
           set -euo pipefail
@@ -445,7 +445,7 @@ jobs:
           )
 
           # Pass values via environment variables to prevent inline string injection
-          export MANIFEST_ARCH="${{ matrix.arch }}"
+          export MANIFEST_ARCH="${{ matrix.flutter_arch }}"
           export MANIFEST_APP_TITLE="${{ env.APP_NAME }}"
           export MANIFEST_PUBLISHER="${{ env.APP_PUBLISHER }}"
           export MANIFEST_BUILD_NAME="${{ env.BUILD_NAME }}"
@@ -524,10 +524,10 @@ jobs:
             runner: ubuntu-24.04
             flutter_arch: x64
             rpm_arch: x86_64
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-            flutter_arch: arm64
-            rpm_arch: aarch64
+          # - arch: aarch64
+          #   runner: ubuntu-24.04-arm
+          #   flutter_arch: arm64
+          #   rpm_arch: aarch64
     steps:
       - name: Install dependencies
         run: |
@@ -577,9 +577,9 @@ jobs:
           path: |
             ~/.pub-cache
             .dart_tool
-          key: ${{ runner.os }}-${{ matrix.arch }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          key: ${{ runner.os }}-${{ matrix.flutter_arch }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.arch }}-pub-
+            ${{ runner.os }}-${{ matrix.flutter_arch }}-pub-
       - name: Get dependencies
         run: flutter pub get
       - name: Build Linux  (release)
@@ -634,7 +634,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.PREFIX }}-debug-symbols
-          path: symbols/linux/${{ matrix.arch }}
+          path: symbols/linux/${{ matrix.flutter_arch }}
           if-no-files-found: error
           retention-days: 30
       - name: Package RPM
@@ -669,7 +669,7 @@ jobs:
           BuildArch:  ${{ matrix.rpm_arch }}
 
           %description
-          ${{ env.APP_NAME }} packaged for Fedora ${{ matrix.arch }}
+          ${{ env.APP_NAME }} packaged for Fedora ${{ matrix.flutter_arch }}
 
           %prep
           %setup -q -c -T
@@ -708,7 +708,7 @@ jobs:
 
           %changelog
           * $(date '+%a %b %d %Y') ${{ env.APP_PUBLISHER }} <soufianes.pro@gmail.com> - ${RPM_VERSION}-1
-          - Automated CI build ${{ matrix.arch }}
+          - Automated CI build ${{ matrix.flutter_arch }}
           EOF
 
           rpmbuild --define "_topdir $PWD/rpmbuild" --bb "rpmbuild/SPECS/app.spec"
@@ -782,7 +782,7 @@ jobs:
           )
 
           # Pass values via environment variables to prevent inline string injection
-          export MANIFEST_ARCH="${{ matrix.arch }}"
+          export MANIFEST_ARCH="${{ matrix.flutter_arch }}"
           export MANIFEST_APP_TITLE="${{ env.APP_NAME }}"
           export MANIFEST_PUBLISHER="${{ env.APP_PUBLISHER }}"
           export MANIFEST_BUILD_NAME="${{ env.BUILD_NAME }}"
