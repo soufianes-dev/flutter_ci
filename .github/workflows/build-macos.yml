@@ -132,6 +132,32 @@ jobs:
           path: symbols/macos
           if-no-files-found: error
           retention-days: 30
+      - name: Package macOS app
+        run: |
+          set -euo pipefail
+
+          SOURCE_DIR="build/macos/Build/Products/Release"
+          DEST="${{ env.PREFIX }}.zip"
+
+          # Locate the generated .app bundle
+          APP_PATH=$(find "$SOURCE_DIR" -maxdepth 1 -name "*.app" | head -n 1)
+
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "Error: No .app bundle found in $SOURCE_DIR"
+            exit 1
+          fi
+
+          # Compress using ditto to preserve symlinks, metadata, and code signatures
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$DEST"
+
+          echo "MACOS_PACKAGE=$DEST" >> "$GITHUB_ENV"
+      - name: Upload macOS Zip
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.MACOS_PACKAGE }}
+          retention-days: 30
+          archive: false
+          if-no-files-found: error
       - name: Package DMG
         run: |
           set -euo pipefail
