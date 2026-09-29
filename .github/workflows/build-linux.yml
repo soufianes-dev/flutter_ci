@@ -172,15 +172,22 @@ jobs:
           set -euo pipefail
 
           SOURCE="build/linux/${{ matrix.flutter_arch }}/release/bundle"
-          DEST="${{ env.PREFIX }}.tar.gz"
+          DEST="${{ env.PREFIX }}.tar.xz"
 
           if [ ! -d "$SOURCE" ]; then exit 1; fi
 
           # Build linux tarball
-          tar -czf "$DEST" -C "$SOURCE" .
+          tar -cJf "$DEST" -C "$SOURCE" .
 
           LINUX_PACKAGE="$DEST"
           echo "LINUX_PACKAGE=$LINUX_PACKAGE" >> "$GITHUB_ENV"
+      - name: Upload Linux Tarball
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.LINUX_PACKAGE }}
+          retention-days: 30
+          archive: false
+          if-no-files-found: error
       - name: Install appimagetool
         env:
           APPIMAGETOOL_FILE: ${{ matrix.appimagetool }}
@@ -250,6 +257,34 @@ jobs:
           APPIMAGE_NAME="${{ env.PREFIX }}.AppImage"
           appimagetool --no-appstream "$APPDIR" "$APPIMAGE_NAME"
           echo "APPIMAGE_NAME=$APPIMAGE_NAME" >> "$GITHUB_ENV"
+      - name: Smoke-test Linux AppImage
+        run: |
+          set -euo pipefail
+
+          file "${{ env.APPIMAGE_NAME }}"
+          test -x "${{ env.APPIMAGE_NAME }}"
+
+          # Verify AppImage runtime header
+          "./${{ env.APPIMAGE_NAME }}" --appimage-version
+
+          # Unpack and verify inner payload structure without requiring FUSE
+          "./${{ env.APPIMAGE_NAME }}" --appimage-extract > /dev/null
+
+          test -x "squashfs-root/AppRun"
+          test -x "squashfs-root/usr/bin/${{ env.APP_NAME }}"
+          test -f "squashfs-root/${{ env.APP_NAME }}.desktop"
+          test -f "squashfs-root/logo.png"
+
+          rm -rf squashfs-root
+
+          echo "✅ AppImage runtime and internal payload looks valid"
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.APPIMAGE_NAME }}
+          retention-days: 30
+          archive: false
+          if-no-files-found: error
       - name: Build Debian package
         run: |
           set -euo pipefail
@@ -352,10 +387,9 @@ jobs:
           # Validate resulting package
           dpkg-deb --info "${DEB_FILE}"
           dpkg-deb --contents "${DEB_FILE}"
-      - name: Smoke-test packages
+      - name: Smoke-test Debian package
         run: |
           set -euo pipefail
-          file "${{ env.APPIMAGE_NAME }}"
 
           dpkg-deb -c "${{ env.DEB_NAME }}" | grep -q \
             "usr/share/applications/${{ env.DEB_PKG_NAME }}.desktop"
@@ -363,10 +397,6 @@ jobs:
             "usr/share/icons/hicolor/256x256/apps/${{ env.DEB_PKG_NAME }}.png"
 
           dpkg-deb -I "${{ env.DEB_NAME }}"
-          echo "✅ Packages look valid ${{ matrix.flutter_arch }}"
-      - name: Smoke-test Debian package
-        run: |
-          set -euo pipefail
 
           sudo apt-get update -qq
           sudo apt-get install \
@@ -379,36 +409,12 @@ jobs:
           test -f "/usr/share/icons/hicolor/256x256/apps/${{ env.DEB_PKG_NAME }}.png"
 
           echo "Debian package installed successfully"
-      - name: Smoke-test AppImage
-        run: |
-          set -euo pipefail
-
-          file "${{ env.APPIMAGE_NAME }}"
-          test -x "${{ env.APPIMAGE_NAME }}"
-
-          # Verify AppImage runtime header
-          "./${{ env.APPIMAGE_NAME }}" --appimage-version
-          
-          # Unpack and verify inner payload structure without requiring FUSE
-          "./${{ env.APPIMAGE_NAME }}" --appimage-extract > /dev/null
-
-          test -x "squashfs-root/AppRun"
-          test -x "squashfs-root/usr/bin/${{ env.APP_NAME }}"
-          test -f "squashfs-root/${{ env.APP_NAME }}.desktop"
-          test -f "squashfs-root/logo.png"
-
-          rm -rf squashfs-root
-          
-          echo "✅ AppImage runtime and internal payload looks valid"
-      - name: Upload Linux packages (Tarball, AppImage, DEB)
+      - name: Upload Debian package
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.PREFIX }}-packages
-          path: |
-            ${{ env.LINUX_PACKAGE }}
-            ${{ env.APPIMAGE_NAME }}
-            ${{ env.DEB_NAME }}
+          path: ${{ env.DEB_NAME }}
           retention-days: 30
+          archive: false
           if-no-files-found: error
       - name: Generate debian build manifest
         run: |
@@ -635,7 +641,7 @@ jobs:
         with:
           name: ${{ env.PREFIX }}-debug-symbols
           path: symbols/linux/${{ matrix.flutter_arch }}
-          if-no-files-found: skip
+          if-no-files-found: ignore
           retention-days: 30
       - name: Package RPM
         run: |
