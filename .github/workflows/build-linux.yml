@@ -11,10 +11,8 @@ permissions:
   contents: read
 env:
   APP_PUBLISHER: "Soufiane Saadouni"
-  PACKAGE_NAME: "flutter-ci"
   FLUTTER_VERSION: "3.47.5"
   FLUTTER_CHANNEL: "stable"
-  APPIMAGETOOL_VERSION: "1.9.1"
 jobs:
   preflight:
     runs-on: ubuntu-24.04
@@ -50,7 +48,6 @@ jobs:
             appimagetool: appimagetool-x86_64.AppImage
             # https://github.com/AppImage/appimagetool/releases/tag/1.9.1
             appimagetool_sha256: "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
-
           - arch: aarch64
             runner: ubuntu-24.04-arm # native ARM runner
             flutter_arch: arm64
@@ -120,6 +117,8 @@ jobs:
       #   run: flutter test
       - name: Build Linux desktop app (${{ matrix.arch }})
         run: |
+          set -euo pipefail
+
           lockfilePath="pubspec.lock"
           lockHash=""
           if [ -f "$lockfilePath" ]; then
@@ -157,7 +156,7 @@ jobs:
             --dart-define="BUILD_TYPE=release" \
             --dart-define="BUILD_FLAVOR=production" \
             --obfuscate \
-            --split-debug-info=symbols/linux \
+            --split-debug-info=symbols/linux/${{ matrix.arch }} \
             --build-name=${{ env.BUILD_NAME }} \
             --build-number=${{ env.BUILD_NUMBER }} \
             --target lib/main.dart
@@ -170,11 +169,10 @@ jobs:
           retention-days: 30
       - name: Package Linux
         run: |
-          APP_NAME="${{ env.APP_NAME }}"
-          VERSION="${{ env.BUILD_NAME }}"
-          ARCH="${{ matrix.flutter_arch }}"
-          SOURCE="build/linux/${ARCH}/release/bundle"
-          DEST="${PACKAGE_NAME}-v${VERSION}-linux-${ARCH}.tar.gz"
+          set -euo pipefail
+
+          SOURCE="build/linux/${{ matrix.arch }}/release/bundle"
+          DEST="${{ env.PREFIX }}.tar.gz"
 
           if [ ! -d "$SOURCE" ]; then exit 1; fi
 
@@ -187,6 +185,7 @@ jobs:
         env:
           APPIMAGETOOL_FILE: ${{ matrix.appimagetool }}
           APPIMAGETOOL_SHA256: ${{ matrix.appimagetool_sha256 }}
+          APPIMAGETOOL_VERSION: "1.9.1"
         run: |
           set -euo pipefail
 
@@ -200,36 +199,37 @@ jobs:
             "$APPIMAGETOOL_URL"
 
           echo "${APPIMAGETOOL_SHA256} ${APPIMAGETOOL_FILE}" | sha256sum --check
-
           chmod +x "$APPIMAGETOOL_FILE"
-
           sudo mv "$APPIMAGETOOL_FILE" /usr/local/bin/appimagetool
-
           appimagetool --version
       - name: Create AppImage
         run: |
           set -euo pipefail
 
-          BUNDLE_DIR="build/linux/${{ matrix.flutter_arch }}/release/bundle"
+          BUNDLE_DIR="build/linux/${{ matrix.arch }}/release/bundle"
           if [[ ! -d "$BUNDLE_DIR" ]]; then
             echo "::error::Flutter bundle not found at $BUNDLE_DIR"
             exit 1
           fi
 
           # Create AppDir structure
+          # Ensure clean AppDir structure
           APPDIR=AppDir
+          rm -rf "$APPDIR"
           mkdir -p "$APPDIR/usr/bin"
           cp -r "$BUNDLE_DIR"/* "$APPDIR/usr/bin/"
 
-          # Copy Icon
+          # Copy Icons
           cp "assets/logo.png" "$APPDIR/logo.png"
           cp "assets/logo.png" "$APPDIR/.DirIcon"
 
-          # Create AppRun
-          cat > "$APPDIR/AppRun" <<EOF
+          # Create AppRun entrypoint wrapper
+          cat > "$APPDIR/AppRun" <<'EOF'
           #!/bin/sh
-          HERE="\$(dirname "\$(readlink -f "\$0")")"
-          exec "\$HERE/usr/bin/${{ env.APP_NAME }}" "\$@"
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export PATH="$HERE/usr/bin:$PATH"
+          export LD_LIBRARY_PATH="$HERE/usr/bin/lib:$HERE/usr/lib:$LD_LIBRARY_PATH"
+          exec "$HERE/usr/bin/${{ env.APP_NAME }}" "$@"
           EOF
           chmod +x "$APPDIR/AppRun"
 
@@ -237,7 +237,7 @@ jobs:
           cat > "$APPDIR/${{ env.APP_NAME }}.desktop" <<EOF
           [Desktop Entry]
           Name=${{ env.APP_NAME }}
-          Version=1.0
+          Version=${{ env.BUILD_NAME }}
           Exec=${{ env.APP_NAME }} %u
           Icon=logo
           Type=Application
@@ -247,8 +247,8 @@ jobs:
           # ARCH is used by appimagetool to select the correct runtime
           export ARCH=${{ matrix.arch }}
           # Build AppImage
-          APPIMAGE_NAME="${{ env.PACKAGE_NAME }}-v${{ env.BUILD_NAME }}-build.${{ env.BUILD_NUMBER }}-linux-${{ matrix.arch }}.AppImage"
-          appimagetool --no-appstream AppDir "$APPIMAGE_NAME"
+          APPIMAGE_NAME="${{ env.PREFIX }}.AppImage"
+          appimagetool --no-appstream "$APPDIR" "$APPIMAGE_NAME"
           echo "APPIMAGE_NAME=$APPIMAGE_NAME" >> "$GITHUB_ENV"
       - name: Build Debian package
         run: |
@@ -260,34 +260,35 @@ jobs:
             binutils
 
           BUNDLE_DIR="build/linux/${{ matrix.flutter_arch }}/release/bundle"
-          PKG_DIR="${{ env.PACKAGE_NAME }}-v${{ env.BUILD_NAME }}-build.${{ env.BUILD_NUMBER }}-linux-${{ matrix.arch }}"
+
+          # Ensure Debian package name is lowercase and contains no underscores
+          DEB_PKG_NAME=$(echo "${{ env.APP_NAME }}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+          DEB_FILE="${{ env.PREFIX }}.deb"
 
           # Create package structure
-          mkdir -p "$PKG_DIR/DEBIAN"
-          mkdir -p "$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}"
-          mkdir -p "$PKG_DIR/usr/bin"
-
-          mkdir -p "$PKG_DIR/usr/share/applications"
-
-          mkdir -p "$PKG_DIR/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "${{ env.PREFIX }}/DEBIAN"
+          mkdir -p "${{ env.PREFIX }}/usr/lib/${DEB_PKG_NAME}"
+          mkdir -p "${{ env.PREFIX }}/usr/bin"
+          mkdir -p "${{ env.PREFIX }}/usr/share/applications"
+          mkdir -p "${{ env.PREFIX }}/usr/share/icons/hicolor/256x256/apps"
 
           # Copy full bundle to usr/lib
-          cp -a "$BUNDLE_DIR"/. "$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}/"
+          cp -a "$BUNDLE_DIR"/. "${{ env.PREFIX }}/usr/lib/${DEB_PKG_NAME}/"
 
           cp \
             "assets/logo256.png" \
-            "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/${{ env.PACKAGE_NAME }}.png"
+            "${{ env.PREFIX }}/usr/share/icons/hicolor/256x256/apps/${DEB_PKG_NAME}.png"
 
           # Symlink binary to usr/bin
-          ln -s "/usr/lib/${{ env.PACKAGE_NAME }}/${{ env.APP_NAME }}" \
-            "$PKG_DIR/usr/bin/${{ env.APP_NAME }}"
+          ln -sf "/usr/lib/${DEB_PKG_NAME}/${{ env.APP_NAME }}" \
+            "${{ env.PREFIX }}/usr/bin/${{ env.APP_NAME }}"
 
           # Desktop entry
-          cat > "$PKG_DIR/usr/share/applications/${{ env.PACKAGE_NAME }}.desktop" <<EOF
+          cat > "${{ env.PREFIX }}/usr/share/applications/${DEB_PKG_NAME}.desktop" <<EOF
           [Desktop Entry]
           Name=${{ env.APP_NAME }}
           Exec=${{ env.APP_NAME }} %U
-          Icon=${{ env.PACKAGE_NAME }}
+          Icon=${DEB_PKG_NAME}
           Type=Application
           Categories=Utility;
           Terminal=false
@@ -299,13 +300,13 @@ jobs:
           mkdir -p "$SHLIBS_DIR/debian"
 
           cat > "$SHLIBS_DIR/debian/control" <<EOF
-          Source: ${{ env.PACKAGE_NAME }}
-          Package: ${{ env.PACKAGE_NAME }}
+          Source: ${DEB_PKG_NAME}
+          Package: ${DEB_PKG_NAME}
           Architecture: ${{ matrix.deb_arch }}
           Description: Flutter Linux application ${{ matrix.arch }}
           EOF
 
-          APP_BINARY="$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}/${{ env.APP_NAME }}"
+          APP_BINARY="${{ env.PREFIX }}/usr/lib/${DEB_PKG_NAME}/${{ env.APP_NAME }}"
 
           if [[ ! -x "$APP_BINARY" ]]; then
             echo "::error::Flutter executable not found or is not executable: $APP_BINARY"
@@ -318,7 +319,7 @@ jobs:
               cd "$SHLIBS_DIR"
               dpkg-shlibdeps \
                 -O \
-                -l"../$PKG_DIR/usr/lib/${{ env.PACKAGE_NAME }}" \
+                -l"../${{ env.PREFIX }}/usr/lib/${DEB_PKG_NAME}" \
                 -e"../$APP_BINARY"
               ) | sed -n 's/^shlibs:Depends=//p'
           )"
@@ -332,8 +333,8 @@ jobs:
           echo "$SHLIBS_DEPENDS"
 
           # Generate binary package metadata
-          cat > "$PKG_DIR/DEBIAN/control" <<EOF
-          Package: ${{ env.PACKAGE_NAME }}
+          cat > "${{ env.PREFIX }}/DEBIAN/control" <<EOF
+          Package: ${DEB_PKG_NAME}
           Version: ${{ env.BUILD_NAME }}
           Architecture: ${{ matrix.deb_arch }}
           Maintainer: ${{ env.APP_PUBLISHER }} <soufianes.pro@gmail.com>
@@ -344,22 +345,22 @@ jobs:
           EOF
 
           # Build .deb package
-          dpkg-deb --build --root-owner-group "$PKG_DIR"
-          echo "DEB_NAME=${PKG_DIR}.deb" >> "$GITHUB_ENV"
-
+          dpkg-deb --build --root-owner-group "${{ env.PREFIX }}"
+          echo "DEB_NAME=${DEB_FILE}" >> "$GITHUB_ENV"
+          echo "DEB_PKG_NAME=${DEB_PKG_NAME}" >> "$GITHUB_ENV"
 
           # Validate resulting package
-          dpkg-deb --info "${PKG_DIR}.deb"
-          dpkg-deb --contents "${PKG_DIR}.deb"
+          dpkg-deb --info "${DEB_FILE}"
+          dpkg-deb --contents "${DEB_FILE}"
       - name: Smoke-test packages
         run: |
           set -euo pipefail
           file "${{ env.APPIMAGE_NAME }}"
 
           dpkg-deb -c "${{ env.DEB_NAME }}" | grep -q \
-            "usr/share/applications/${{ env.PACKAGE_NAME }}.desktop"
+            "usr/share/applications/${{ env.DEB_PKG_NAME }}.desktop"
           dpkg-deb -c "${{ env.DEB_NAME }}" | grep -q \
-            "usr/share/icons/hicolor/256x256/apps/${{ env.PACKAGE_NAME }}.png"
+            "usr/share/icons/hicolor/256x256/apps/${{ env.DEB_PKG_NAME }}.png"
 
           dpkg-deb -I "${{ env.DEB_NAME }}"
           echo "✅ Packages look valid ${{ matrix.arch }}"
@@ -374,8 +375,8 @@ jobs:
 
           command -v "${{ env.APP_NAME }}"
           test -L "/usr/bin/${{ env.APP_NAME }}"
-          test -f "/usr/share/applications/${{ env.PACKAGE_NAME }}.desktop"
-          test -f "/usr/share/icons/hicolor/256x256/apps/${{ env.PACKAGE_NAME }}.png"
+          test -f "/usr/share/applications/${{ env.DEB_PKG_NAME }}.desktop"
+          test -f "/usr/share/icons/hicolor/256x256/apps/${{ env.DEB_PKG_NAME }}.png"
 
           echo "Debian package installed successfully"
       - name: Smoke-test AppImage
@@ -384,8 +385,21 @@ jobs:
 
           file "${{ env.APPIMAGE_NAME }}"
           test -x "${{ env.APPIMAGE_NAME }}"
+
+          # Verify AppImage runtime header
           "./${{ env.APPIMAGE_NAME }}" --appimage-version
-          echo "✅ AppImage looks valid"
+          
+          # Unpack and verify inner payload structure without requiring FUSE
+          "./${{ env.APPIMAGE_NAME }}" --appimage-extract > /dev/null
+
+          test -x "squashfs-root/AppRun"
+          test -x "squashfs-root/usr/bin/${{ env.APP_NAME }}"
+          test -f "squashfs-root/${{ env.APP_NAME }}.desktop"
+          test -f "squashfs-root/logo.png"
+
+          rm -rf squashfs-root
+          
+          echo "✅ AppImage runtime and internal payload looks valid"
       - name: Upload Linux packages (Tarball, AppImage, DEB)
         uses: actions/upload-artifact@v7
         with:
@@ -396,7 +410,7 @@ jobs:
             ${{ env.DEB_NAME }}
           retention-days: 30
           if-no-files-found: error
-      - name: Generate build manifest
+      - name: Generate debian build manifest
         run: |
           set -euo pipefail
 
@@ -430,6 +444,14 @@ jobs:
             "${{ env.DEB_NAME }}"
           )
 
+          # Pass values via environment variables to prevent inline string injection
+          export MANIFEST_ARCH="${{ matrix.arch }}"
+          export MANIFEST_APP_TITLE="${{ env.APP_NAME }}"
+          export MANIFEST_PUBLISHER="${{ env.APP_PUBLISHER }}"
+          export MANIFEST_BUILD_NAME="${{ env.BUILD_NAME }}"
+          export MANIFEST_BUILD_NUMBER="${{ env.BUILD_NUMBER }}"
+          export MANIFEST_RUN_ID="${{ github.run_id }}"
+
           python3 -c '
           import json, os, hashlib, sys
           manifestPath = sys.argv[-1]
@@ -459,20 +481,19 @@ jobs:
 
           manifest = {
               "platform": "linux",
-              "architecture": "${{ matrix.arch }}",
-              "app_title": "${{ env.APP_NAME }}",
-              "publisher": "${{ env.APP_PUBLISHER }}",
-              "build_name": "${{ env.BUILD_NAME }}",
-              "build_number": "${{ env.BUILD_NUMBER }}",
-              "package_name": "${{ env.PACKAGE_NAME }}",
+              "architecture": os.environ.get("MANIFEST_ARCH"),
+              "app_title": os.environ.get("MANIFEST_APP_TITLE"),
+              "publisher": os.environ.get("MANIFEST_PUBLISHER"),
+              "build_name": os.environ.get("MANIFEST_BUILD_NAME"),
+              "build_number": os.environ.get("MANIFEST_BUILD_NUMBER"),
               "build_flavor": "production",
               "build_type": "release",
-              "ci_run_id": "${{ github.run_id }}",
+              "ci_run_id": os.environ.get("MANIFEST_RUN_ID"),
               "dependency_lock_hash": lockHash,
               "git_sha": gitCommitSha,
               "git_branch": gitBranchName,
               "build_timestamp": buildTimestamp,
-              "flutter_version": flutterVersionStr,
+              "compiler_version": flutterVersionStr,
               "dart_version": dartVersionStr,
               "artifacts": artifacts
           }
@@ -503,7 +524,6 @@ jobs:
             runner: ubuntu-24.04
             flutter_arch: x64
             rpm_arch: x86_64
-
           - arch: aarch64
             runner: ubuntu-24.04-arm
             flutter_arch: arm64
@@ -581,7 +601,7 @@ jobs:
           buildTimestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           gitCommitSha=$(git rev-parse HEAD)
-          gitBranchName=${{ github.ref_name }}
+          gitBranchName="${{ github.ref_name }}"
 
           flutterVersionOutput=$(flutter --version --machine)
           flutterFwVersion=$(echo "$flutterVersionOutput" | jq -r '.frameworkVersion')
@@ -627,16 +647,21 @@ jobs:
             exit 1
           fi
 
+          # Ensure clean build workspace
+          rm -rf rpmbuild
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
           cp -r "$BUNDLE_DIR" rpmbuild/SOURCES/app
-          cp "assets/logo256.png" \
-            "rpmbuild/SOURCES/logo256.png"
+          cp "assets/logo256.png" "rpmbuild/SOURCES/logo256.png"
+
+          # Sanitize version string for RPM compliance (disallows hyphens)
+          RPM_VERSION=$(echo "${{ env.BUILD_NAME }}" | tr '-' '.')
 
           cat > rpmbuild/SPECS/app.spec <<EOF
           %global debug_package %{nil}
 
-          Name:       ${{ env.PACKAGE_NAME }}
-          Version:    ${{ env.BUILD_NAME }}
+          Name:       ${{ env.APP_NAME }}
+          Version:    $RPM_VERSION
           Release:    1%{?dist}
           Summary:    Flutter Linux application
           License:    Proprietary # TODO
@@ -650,44 +675,41 @@ jobs:
           %setup -q -c -T
 
           %install
-          mkdir -p %{buildroot}/usr/lib/${{ env.PACKAGE_NAME }}
+          mkdir -p %{buildroot}/usr/lib/${{ env.APP_NAME }}
           mkdir -p %{buildroot}/usr/bin
           mkdir -p %{buildroot}/usr/share/applications
           mkdir -p %{buildroot}/usr/share/icons/hicolor/256x256/apps
 
-          cat > %{buildroot}/usr/share/applications/${{ env.PACKAGE_NAME }}.desktop <<EOF_DESKTOP
+          cat > %{buildroot}/usr/share/applications/${{ env.APP_NAME }}.desktop <<EOF_DESKTOP
           [Desktop Entry]
           Name=${{ env.APP_NAME }}
           Exec=${{ env.APP_NAME }} %U
-          Icon=${{ env.PACKAGE_NAME }}
+          Icon=${{ env.APP_NAME }}
           Type=Application
           Categories=Utility;
           Terminal=false
           StartupNotify=true
           EOF_DESKTOP
 
-          # Copy the binary into /usr/bin
-          cp -r %{SOURCE0}/* %{buildroot}/usr/lib/${{ env.PACKAGE_NAME }}/
+          # Copy bundle binaries and assets into
+          cp -r %{SOURCE0}/* %{buildroot}/usr/lib/${{ env.APP_NAME }}/
 
-          ln -sf /usr/lib/${{ env.PACKAGE_NAME }}/${{ env.APP_NAME }} \
+          ln -sf /usr/lib/${{ env.APP_NAME }}/${{ env.APP_NAME }} \
             %{buildroot}/usr/bin/${{ env.APP_NAME }}
 
           cp %{_sourcedir}/logo256.png \
-            %{buildroot}/usr/share/icons/hicolor/256x256/apps/${{ env.PACKAGE_NAME }}.png
+            %{buildroot}/usr/share/icons/hicolor/256x256/apps/${{ env.APP_NAME }}.png
 
           %files
           /usr/bin/${{ env.APP_NAME }}
-          %dir /usr/lib/${{ env.PACKAGE_NAME }}
-          /usr/lib/${{ env.PACKAGE_NAME }}/*
-          /usr/share/applications/${{ env.PACKAGE_NAME }}.desktop
-          /usr/share/icons/hicolor/256x256/apps/${{ env.PACKAGE_NAME }}.png
+          /usr/lib/${{ env.APP_NAME }}
+          /usr/share/applications/${{ env.APP_NAME }}.desktop
+          /usr/share/icons/hicolor/256x256/apps/${{ env.APP_NAME }}.png
 
           %changelog
-          * $(date '+%a %b %d %Y') ${{ env.APP_PUBLISHER }} <soufianes.pro@gmail.com> - ${{ env.BUILD_NAME }}-1
+          * $(date '+%a %b %d %Y') ${{ env.APP_PUBLISHER }} <soufianes.pro@gmail.com> - ${RPM_VERSION}-1
           - Automated CI build ${{ matrix.arch }}
           EOF
-
-
 
           rpmbuild --define "_topdir $PWD/rpmbuild" --bb "rpmbuild/SPECS/app.spec"
       - name: Smoke-test RPM
@@ -707,15 +729,15 @@ jobs:
           dnf install -y "$RPM_FILE"
 
           rpm -qpl "$RPM_FILE" | grep -Fx \
-              "/usr/share/applications/${{ env.PACKAGE_NAME }}.desktop"
+              "/usr/share/applications/${{ env.APP_NAME }}.desktop"
           rpm -qpl "$RPM_FILE" | grep -Fx \
-              "/usr/share/icons/hicolor/256x256/apps/${{ env.PACKAGE_NAME }}.png"
+              "/usr/share/icons/hicolor/256x256/apps/${{ env.APP_NAME }}.png"
 
           command -v "${{ env.APP_NAME }}"
 
           test -L "/usr/bin/${{ env.APP_NAME }}"
-          test -f "/usr/share/applications/${{ env.PACKAGE_NAME }}.desktop"
-          test -f "/usr/share/icons/hicolor/256x256/apps/${{ env.PACKAGE_NAME }}.png"
+          test -f "/usr/share/applications/${{ env.APP_NAME }}.desktop"
+          test -f "/usr/share/icons/hicolor/256x256/apps/${{ env.APP_NAME }}.png"
 
           echo "✅ RPM package installed successfully"
       - name: Upload RPM package
@@ -725,7 +747,7 @@ jobs:
           name: ${{ env.PREFIX }}-rpm
           retention-days: 30
           if-no-files-found: error
-      - name: Generate rpm build manifest
+      - name: Generate RPM build manifest
         run: |
           set -euo pipefail
 
@@ -753,8 +775,19 @@ jobs:
 
           dartVersionStr=$(dart --version 2>&1 | head -n 1)
 
-          RPM_FILE=$(find "rpmbuild/RPMS/${{ matrix.rpm_arch }}" -maxdepth 1 -name '*.rpm' -print -quit)
-          candidateArtifacts=("$RPM_FILE")
+          candidateArtifacts=(
+            "${{ env.LINUX_PACKAGE }}"
+            "${{ env.APPIMAGE_NAME }}"
+            "${{ env.DEB_NAME }}"
+          )
+
+          # Pass values via environment variables to prevent inline string injection
+          export MANIFEST_ARCH="${{ matrix.arch }}"
+          export MANIFEST_APP_TITLE="${{ env.APP_NAME }}"
+          export MANIFEST_PUBLISHER="${{ env.APP_PUBLISHER }}"
+          export MANIFEST_BUILD_NAME="${{ env.BUILD_NAME }}"
+          export MANIFEST_BUILD_NUMBER="${{ env.BUILD_NUMBER }}"
+          export MANIFEST_RUN_ID="${{ github.run_id }}"
 
           python3 -c '
           import json, os, hashlib, sys
@@ -785,20 +818,19 @@ jobs:
 
           manifest = {
               "platform": "linux",
-              "architecture": "${{ matrix.arch }}",
-              "app_title": "${{ env.APP_NAME }}",
-              "publisher": "${{ env.APP_PUBLISHER }}",
-              "build_name": "${{ env.BUILD_NAME }}",
-              "build_number": "${{ env.BUILD_NUMBER }}",
-              "package_name": "${{ env.PACKAGE_NAME }}",
+              "architecture": os.environ.get("MANIFEST_ARCH"),
+              "app_title": os.environ.get("MANIFEST_APP_TITLE"),
+              "publisher": os.environ.get("MANIFEST_PUBLISHER"),
+              "build_name": os.environ.get("MANIFEST_BUILD_NAME"),
+              "build_number": os.environ.get("MANIFEST_BUILD_NUMBER"),
               "build_flavor": "production",
               "build_type": "release",
-              "ci_run_id": "${{ github.run_id }}",
+              "ci_run_id": os.environ.get("MANIFEST_RUN_ID"),
               "dependency_lock_hash": lockHash,
               "git_sha": gitCommitSha,
               "git_branch": gitBranchName,
               "build_timestamp": buildTimestamp,
-              "flutter_version": flutterVersionStr,
+              "compiler_version": flutterVersionStr,
               "dart_version": dartVersionStr,
               "artifacts": artifacts
           }
@@ -807,11 +839,11 @@ jobs:
             json.dump(manifest, f, indent=2)
           ' "${candidateArtifacts[@]}" "$lockHash" "$gitCommitSha" "$gitBranchName" "$buildTimestamp" "$flutterVersionStr" "$dartVersionStr" "$manifestPath"
 
-          echo "✅ RPM build manifest generated at $manifestPath"
+          echo "✅ Build manifest generated at $manifestPath"
       - name: Upload RPM build manifest
         uses: actions/upload-artifact@v7
         with:
           path: rpm_build_manifest.json
-          name: ${{ env.PREFIX }}-rpm
+          archive: false
           retention-days: 30
           if-no-files-found: error

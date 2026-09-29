@@ -230,6 +230,14 @@ jobs:
             "${{ env.PKG_NAME }}"
           )
 
+          # Pass values via environment variables to prevent inline string injection
+          export MANIFEST_ARCH="${{ env.ARCH }}"
+          export MANIFEST_APP_TITLE="${{ env.APP_NAME }}"
+          export MANIFEST_PUBLISHER="${{ env.APP_PUBLISHER }}"
+          export MANIFEST_BUILD_NAME="${{ env.BUILD_NAME }}"
+          export MANIFEST_BUILD_NUMBER="${{ env.BUILD_NUMBER }}"
+          export MANIFEST_RUN_ID="${{ github.run_id }}"
+
           python3 -c '
           import json, os, hashlib, sys
           manifestPath = sys.argv[-1]
@@ -259,20 +267,19 @@ jobs:
 
           manifest = {
               "platform": "macos",
-              "architecture": "${{ env.ARCH }}",
-              "app_title": "${{ env.APP_NAME }}",
-              "publisher": "${{ env.APP_PUBLISHER }}",
-              "build_name": "${{ env.BUILD_NAME }}",
-              "build_number": "${{ env.BUILD_NUMBER }}",
-              "identifier": "${{ env.IDENTIFIER }}",
+              "architecture": os.environ.get("MANIFEST_ARCH"),
+              "app_title": os.environ.get("MANIFEST_APP_TITLE"),
+              "publisher": os.environ.get("MANIFEST_PUBLISHER"),
+              "build_name": os.environ.get("MANIFEST_BUILD_NAME"),
+              "build_number": os.environ.get("MANIFEST_BUILD_NUMBER"),
               "build_flavor": "production",
               "build_type": "release",
-              "ci_run_id": "${{ github.run_id }}",
+              "ci_run_id": os.environ.get("MANIFEST_RUN_ID"),
               "dependency_lock_hash": lockHash,
               "git_sha": gitCommitSha,
               "git_branch": gitBranchName,
               "build_timestamp": buildTimestamp,
-              "flutter_version": flutterVersionStr,
+              "compiler_version": flutterVersionStr,
               "dart_version": dartVersionStr,
               "artifacts": artifacts
           }

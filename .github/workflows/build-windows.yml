@@ -24,16 +24,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # - arch: x64
-          #   runs-on: windows-2025-vs2026 # Windows Server 2025 with Visual Studio 2026
-          #   flutter_arch: x64
-          #   inno_archs_allowed: x64compatible
-          #   inno_archs_install: x64compatible
-          - arch: arm64
-            runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
-            flutter_arch: arm64
-            inno_archs_allowed: arm64
-            inno_archs_install: arm64
+          - arch: x64
+            runs-on: windows-2025-vs2026 # Windows Server 2025 with Visual Studio 2026
+            flutter_arch: x64
+            inno_archs_allowed: x64compatible
+            inno_archs_install: x64compatible
+          # - arch: arm64
+          #   runs-on: windows-11-vs2026-arm # Windows 11 with Visual Studio 2026
+          #   flutter_arch: arm64
+          #   inno_archs_allowed: arm64
+          #   inno_archs_install: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -71,12 +71,6 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           architecture: x64 # Force x64 Flutter SDK setup (x64 host cross-compiles both x64 & ARM64)
           cache: true
-      - name: Set up Java JDK
-        uses: actions/setup-java@v6
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          architecture: ${{ matrix.arch }}
       - name: Cache pub dependencies
         uses: actions/cache@v6
         with:
@@ -628,3 +622,24 @@ jobs:
       #     }
 
       #     Write-Host "✅ Published $env:MSIX_FILE to Microsoft Store successfully."
+
+
+
+
+
+
+      # TODO: Yo must build the arm64 and x64 .msix files and put them in a folder called msix_packages 
+      # So they got compiled to a MyApp.msixbundle
+      # - name:  Create MSIX bundle
+      #   shell: pwsh
+      #   run: |
+      #     # Find the Windows SDK MakeAppx tool executable
+      #     $makeAppx = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\MakeAppx.exe" | Select-Object -Last 1).FullName
+
+      #     # Run the bundle command
+      #     & $MakeAppx bundle /d .\msix_packages /p .\MyApp.msixbundle /v
+      # - name: Upload MSIX bundle artifact
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     path: MyApp.msixbundle
+      #     archive: false
