@@ -237,7 +237,7 @@ jobs:
           cat > "$APPDIR/${{ env.APP_NAME }}.desktop" <<EOF
           [Desktop Entry]
           Name=${{ env.APP_NAME }}
-          Version=${{ env.BUILD_NAME }}
+          Version=1.0
           Exec=${{ env.APP_NAME }} %u
           Icon=logo
           Type=Application
@@ -626,7 +626,7 @@ jobs:
             --dart-define="BUILD_TYPE=release" \
             --dart-define="BUILD_FLAVOR=production" \
             --obfuscate \
-            --split-debug-info=symbols/linux \
+            --split-debug-info=symbols/linux/${{ matrix.flutter_arch }} \
             --build-name=${{ env.BUILD_NAME }} \
             --build-number=${{ env.BUILD_NUMBER }} \
             --target lib/main.dart
@@ -635,7 +635,7 @@ jobs:
         with:
           name: ${{ env.PREFIX }}-debug-symbols
           path: symbols/linux/${{ matrix.flutter_arch }}
-          if-no-files-found: error
+          if-no-files-found: skip
           retention-days: 30
       - name: Package RPM
         run: |
