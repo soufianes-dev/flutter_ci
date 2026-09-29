@@ -104,7 +104,6 @@ jobs:
             --build-name=${{ env.BUILD_NAME }} \
             --build-number=${{ env.BUILD_NUMBER }} \
             --source-maps \
-            --enable-wasm-deferred-loading \
             --tree-shake-icons \
             --base-href / \
             --target lib/main.dart
