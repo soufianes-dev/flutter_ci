@@ -571,6 +571,7 @@ jobs:
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
           echo "BUILD_NAME=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+          echo "PREFIX=${APP_NAME}-v${VERSION}-build.${BUILD}-linux-${{ matrix.flutter_arch }}" >> "$GITHUB_ENV"
       - name: Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
@@ -588,7 +589,7 @@ jobs:
             ${{ runner.os }}-${{ matrix.flutter_arch }}-pub-
       - name: Get dependencies
         run: flutter pub get
-      - name: Build Linux  (release)
+      - name: Build Linux (release)
         run: |
           # Workaround for Flutter bug: CMake install fails when
           # build/native_assets/linux does not exist (no native assets).
@@ -718,16 +719,16 @@ jobs:
           EOF
 
           rpmbuild --define "_topdir $PWD/rpmbuild" --bb "rpmbuild/SPECS/app.spec"
+
+          BUILT_RPM=$(find "rpmbuild/RPMS/${{ matrix.rpm_arch }}" -maxdepth 1 -name '*.rpm' -print -quit)
+          RPM_NAME="${{ env.PREFIX }}.rpm"
+          cp "$BUILT_RPM" "$RPM_NAME"
+          echo "RPM_NAME=$RPM_NAME" >> "$GITHUB_ENV"
       - name: Smoke-test RPM
         run: |
           set -euo pipefail
 
-          RPM_FILE=$(find \
-          "rpmbuild/RPMS/${{ matrix.rpm_arch }}" \
-          -maxdepth 1 \
-          -name '*.rpm' \
-          -print \
-          -quit)
+          RPM_FILE="${{ env.RPM_NAME }}"
 
           test -n "$RPM_FILE"
           rpm -qp --info "$RPM_FILE"
@@ -749,8 +750,8 @@ jobs:
       - name: Upload RPM package
         uses: actions/upload-artifact@v7
         with:
-          path: rpmbuild/RPMS/${{ matrix.rpm_arch }}/*.rpm
-          name: ${{ env.PREFIX }}-rpm
+          path: ${{ env.RPM_NAME }}
+          archive: false
           retention-days: 30
           if-no-files-found: error
       - name: Generate RPM build manifest
@@ -782,9 +783,7 @@ jobs:
           dartVersionStr=$(dart --version 2>&1 | head -n 1)
 
           candidateArtifacts=(
-            "${{ env.LINUX_PACKAGE }}"
-            "${{ env.APPIMAGE_NAME }}"
-            "${{ env.DEB_NAME }}"
+            ${{ env.RPM_NAME }}
           )
 
           # Pass values via environment variables to prevent inline string injection
