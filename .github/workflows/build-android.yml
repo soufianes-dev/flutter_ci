@@ -111,7 +111,7 @@ jobs:
           storePassword=${KEYSTORE_STORE_PASSWORD}
           keyPassword=$KEYSTORE_KEY_PASSWORD
           keyAlias=$KEYSTORE_KEY_ALIAS
-          storeFile=android/app/upload-keystore.jks
+          storeFile=upload-keystore.jks
           EOF
       # Setup Ruby, Bundler, and Gemfile dependencies
       - name: Install Ruby
@@ -136,8 +136,6 @@ jobs:
           CI_PIPELINE_ID: ${{ github.run_id }}
           BUILD_HOST: ${{ runner.name }}
         run: |
-          # bundle exec fastlane add_plugin firebase_app_distribution
-          # bundle install
           bundle exec fastlane build_all_android_artifacts
 
           # Validate flutter-ci-432e4-b2e456c83eaa.json

@@ -127,8 +127,6 @@ jobs:
           # FIREBASE_APP_DISTRIBUTION_TESTERS: ${{ secrets.FIREBASE_APP_DISTRIBUTION_TESTERS }}
         working-directory: ${{ env.WORKING_DIR }}
         run: |
-          # fastlane add_plugin firebase_app_distribution
-          bundle install
           bundle exec fastlane build_simulator
           # bundle exec fastlane build_debug
           # bundle exec fastlane build_firebase
