@@ -107,6 +107,7 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+          working-directory: ${{ env.WORKING_DIR }}
       - name: Build iOS application
         env:
           APP_NAME: ${{ env.APP_NAME }}
