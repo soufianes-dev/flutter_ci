@@ -94,13 +94,13 @@ jobs:
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
-      # NOTE: Convert key.properties to base64: `base64 -i android/app/upload-keystore.jks`
+      # NOTE: Convert key.properties to base64: `base64 -w 0 android/app/upload-keystore.jks`
       # and add it to github secrets
       - name: Decode keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          echo "$KEYSTORE_BASE64" | base64 -d -i > android/app/upload-keystore.jks
       - name: Configure signing
         env:
           KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
@@ -146,14 +146,12 @@ jobs:
 
         working-directory: ${{ env.WORKING_DIR }}
       - name: Upload App Bundle
-        if: always()
         uses: actions/upload-artifact@v7
         with:
           path: build/app/outputs/bundle/release/*.aab
           archive: false
           retention-days: 90
       - name: Upload APK Artifacts
-        if: always()
         uses: actions/upload-artifact@v7
         with:
           path: build/app/outputs/flutter-apk/*.apk*
