@@ -186,18 +186,18 @@ platform :android do
 
   private_lane :artifact_filename do |options|
     extension = options.fetch(:extension)
-    platform  = options.fetch(:platform)
     flavor    = options[:flavor]
+    abi       = options[:abi]
     signed    = options.fetch(:signed, false)
 
     signed_status = signed ? "signed" : "unsigned"
 
     parts = [
       APP_NAME,
-      "v#{build_name}-build.#{build_number}",
-      platform
+      "v#{build_name}-build.#{build_number}"
     ]
 
+    parts << abi unless abi.to_s.strip.empty?
     parts << flavor unless flavor.to_s.strip.empty?
     parts << signed_status
 
@@ -501,10 +501,11 @@ platform :android do
     sh("flutter clean")
   end
 
-  private_lane :build_release_apk do
+  private_lane :build_release_apk do |options|
     args = [
       "flutter", "build", "apk",
       "--release",
+      "--split-per-abi",
       "--obfuscate",
       "--split-debug-info=#{DEBUG_INFO_DIRECTORY}",
       "--build-name=#{build_name}",
@@ -512,19 +513,32 @@ platform :android do
     ] + dart_define_args
 
     sh(*args)
-    validate_apk_artifact
 
-    named_apk = File.join(
-      File.dirname(ANDROID_APK_PATH),
-      artifact_filename(
-        extension: "apk",
-        platform: "android",
-        flavor: artifact_flavor,
-        signed: true
+    apk_dir = File.join(PROJECT_ROOT, "build/app/outputs/flutter-apk")
+    split_apks = Dir.glob(File.join(apk_dir, "app-*-release.apk"))
+
+    if split_apks.empty?
+      UI.user_error!("No split APKs found in #{apk_dir}")
+    end
+
+    split_apks.each do |source_apk|
+      validate_artifact(path: source_apk, name: "Android Split APK (#{File.basename(source_apk)})")
+
+      # Extract ABI architecture (e.g., 'arm64-v8a' from 'app-arm64-v8a-release.apk')
+      abi = File.basename(source_apk).match(/^app-(.*)-release\.apk$/)&.captures&.first
+
+      named_apk = File.join(
+        apk_dir,
+        artifact_filename(
+          extension: "apk",
+          abi: abi,
+          flavor: artifact_flavor,
+          signed: true
+        )
       )
-    )
 
-    copy_artifact(source: ANDROID_APK_PATH, destination: named_apk)
+      copy_artifact(source: source_apk, destination: named_apk)
+    end
   end
 
   private_lane :build_release_aab do
@@ -544,7 +558,6 @@ platform :android do
       File.dirname(ANDROID_AAB_PATH),
       artifact_filename(
         extension: "aab",
-        platform: "android",
         flavor: artifact_flavor,
         signed: true
       )
