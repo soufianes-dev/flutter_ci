@@ -1,11 +1,3 @@
-# AI GENERATED
-
-# fastlane/Fastfile
-#
-# =============================================================================
-# Fastlane Configuration — Flutter iOS (Hardened Production Release v3)
-# =============================================================================
-
 require "json"
 require "fileutils"
 require "digest"
@@ -492,7 +484,7 @@ platform :ios do
     UI.success("Flutter analysis passed.")
   end
 
-  private_lane :run_tests do
+  private_lane :execute_flutter_tests do
     UI.message("Running Flutter tests...")
     sh("flutter", "test")
     UI.success("Flutter tests passed.")
@@ -634,7 +626,7 @@ platform :ios do
     validate_artifact(path: DEBUG_APP_PATH, name: "Debug device .app")
   end
 
-  private_lane :validate_firebase_artifact do
+  private_lane :check_firebase_artifacts do
     validate_artifact(path: FIREBASE_IPA_PATH, name: "Firebase App Distribution IPA")
     validate_artifact(path: FIREBASE_ARCHIVE_PATH, name: "Firebase App Distribution archive")
   end
@@ -652,7 +644,7 @@ platform :ios do
     [SIMULATOR_APP_PATH, DEBUG_APP_PATH, FIREBASE_IPA_PATH, FIREBASE_ARCHIVE_PATH, RELEASE_IPA_PATH, RELEASE_ARCHIVE_PATH].each do |path|
       next unless File.exist?(path)
 
-       # Convert absolute path to a clean relative path from PROJECT_ROOT
+      # Convert absolute path to a clean relative path from PROJECT_ROOT
       rel_path = Pathname.new(path).relative_path_from(Pathname.new(PROJECT_ROOT)).to_s
 
       if File.file?(path)
@@ -696,7 +688,6 @@ platform :ios do
       "artifacts"            => artifacts
     }
 
-    # Optional API URL backported from Android pattern
     base_url = api_base_url
     manifest["api_base_url"] = base_url unless base_url.empty?
 
@@ -715,7 +706,6 @@ platform :ios do
       "Bug fixes and improvements."
     end
 
-    # Truncate clean at last whitespace boundary before max_length
     if notes.length > max_length
       truncated = notes[0..(max_length - 4)]
       space_index = truncated.rindex(/\s/)
@@ -731,7 +721,7 @@ platform :ios do
   # ===========================================================================
 
   private_lane :publish_firebase do
-    validate_firebase_artifact
+    check_firebase_artifacts
     validate_firebase_configuration
 
     UI.message("Uploading existing IPA to Firebase App Distribution...")
@@ -777,7 +767,6 @@ platform :ios do
 
     UI.message("Uploading existing IPA to App Store Connect...")
 
-    # Namespaced env var lookup with legacy fallback
     skip_metadata = ENV["IOS_SKIP_METADATA"] || ENV["SKIP_METADATA"] || "true"
     skip_screenshots = ENV["IOS_SKIP_SCREENSHOTS"] || ENV["SKIP_SCREENSHOTS"] || "true"
 
@@ -850,7 +839,7 @@ platform :ios do
   lane :test do
     validate_flutter_environment
     install_flutter_dependencies
-    run_tests
+    execute_flutter_tests
   end
 
   desc "Run Flutter tests with coverage"
@@ -866,7 +855,7 @@ platform :ios do
     install_flutter_dependencies
     check_formatting
     run_code_analysis
-    run_tests
+    execute_flutter_tests
   end
 
   # ===========================================================================
@@ -908,7 +897,7 @@ platform :ios do
 
     install_flutter_dependencies
     build_simulator_artifact
-    generate_build_manifest(dev, debug)
+    generate_build_manifest(flavor: "dev", build_type: "debug")
   end
 
   desc "Build iOS Debug device application"
@@ -921,7 +910,7 @@ platform :ios do
 
     install_flutter_dependencies
     build_debug_device_artifact
-    generate_build_manifest(dev, debug)
+    generate_build_manifest(flavor: "dev", build_type: "debug")
   end
 
   desc "Build Firebase App Distribution Ad Hoc IPA"
@@ -935,7 +924,7 @@ platform :ios do
 
     install_flutter_dependencies
     build_firebase_ipa_artifact
-    generate_build_manifest(dev, debug)
+    generate_build_manifest(flavor: "dev", build_type: "debug")
 
     UI.success("Firebase App Distribution build artifact generated successfully.")
   end
@@ -951,7 +940,7 @@ platform :ios do
 
     install_flutter_dependencies
     build_appstore_ipa_artifact
-    generate_build_manifest(production, release)
+    generate_build_manifest(flavor: "production", build_type: "release")
   end
 
   desc "Build Simulator, Debug device, Firebase Ad Hoc IPA and signed App Store IPA"
@@ -969,7 +958,7 @@ platform :ios do
     build_firebase_ipa_artifact
     build_appstore_ipa_artifact
 
-    generate_build_manifest(production, release)
+    generate_build_manifest(flavor: "production", build_type: "release")
 
     UI.success("All iOS build artifacts generated successfully.")
   end
@@ -990,7 +979,7 @@ platform :ios do
 
   desc "Validate existing Firebase App Distribution IPA"
   lane :validate_firebase_artifact do
-    validate_firebase_artifact
+    check_firebase_artifacts
   end
 
   desc "Validate existing App Store IPA"
@@ -998,18 +987,13 @@ platform :ios do
     validate_release_artifact
   end
 
-  # desc "Generate build manifest for existing iOS artifacts"
-  # lane :build_manifest do |options|
-  #   generate_build_manifest(options)
-  # end
-
   # ===========================================================================
   # Public Lanes — PUBLISH LANES (Consumes Artifacts Only — NEVER Builds)
   # ===========================================================================
 
   desc "Upload existing Firebase IPA — NEVER builds"
   lane :firebase do
-    validate_firebase_artifact
+    check_firebase_artifacts
     publish_firebase
   end
 
@@ -1020,14 +1004,14 @@ platform :ios do
     publish_testflight
   end
 
-  desc "Upload existing IPA to App Store Connect (skips metadata/screenshots by default via IOS_SKIP_METADATA/IOS_SKIP_SCREENSHOTS) — NEVER builds"
+  desc "Upload existing IPA to App Store Connect — NEVER builds"
   lane :appstore do
     validate_release_artifact
     validate_app_store_connect_configuration
     publish_appstore
   end
 
-  desc "Submit an already uploaded App Store Connect build for review (assumes metadata already exists on ASC)"
+  desc "Submit an already uploaded App Store Connect build for review"
   lane :submit_review do |options|
     validate_app_store_connect_configuration
     submit_existing_build(build_number: options[:build_number])
