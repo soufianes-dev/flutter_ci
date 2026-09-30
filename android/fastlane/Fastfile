@@ -1,9 +1,3 @@
-# fastlane/Fastfile
-#
-# =============================================================================
-# Fastlane Configuration — Flutter Android (Hardened Production Release v4)
-# =============================================================================
-
 require "json"
 require "fileutils"
 require "digest"
@@ -58,6 +52,34 @@ platform :android do
       UI.user_error!("ARTIFACT_FLAVOR contains invalid characters. Allowed: alphanumeric, '.', '_', '-'")
     end
     flavor
+  end
+
+  # Dynamic artifact resolution helpers (supports same-process and cross-process runs)
+  def actual_aab_path
+    return @named_aab_path if defined?(@named_aab_path) && @named_aab_path && File.exist?(@named_aab_path)
+
+    if !build_name.empty? && !build_number.empty?
+      expected_named_path = File.join(
+        File.dirname(ANDROID_AAB_PATH),
+        artifact_filename(extension: "aab", flavor: artifact_flavor, signed: true)
+      )
+      return expected_named_path if File.exist?(expected_named_path)
+    end
+
+    ANDROID_AAB_PATH
+  end
+
+  def actual_apk_path
+    return @named_apk_path if defined?(@named_apk_path) && @named_apk_path && File.exist?(@named_apk_path)
+
+    if !build_name.empty? && !build_number.empty?
+      apk_dir = File.join(PROJECT_ROOT, "build/app/outputs/flutter-apk")
+      expected_pattern = File.join(apk_dir, "#{APP_NAME}-v#{build_name}-build.#{build_number}*.apk")
+      found_apks = Dir.glob(expected_pattern)
+      return found_apks.first if found_apks.any?
+    end
+
+    ANDROID_APK_PATH
   end
 
   # Metadata & Output Paths
@@ -347,11 +369,11 @@ platform :android do
   end
 
   private_lane :validate_apk_artifact do
-    validate_artifact(path: ANDROID_APK_PATH, name: "Android APK")
+    validate_artifact(path: actual_apk_path, name: "Android APK")
   end
 
   private_lane :validate_aab_artifact do
-    validate_artifact(path: ANDROID_AAB_PATH, name: "Android App Bundle")
+    validate_artifact(path: actual_aab_path, name: "Android App Bundle")
   end
 
   # ===========================================================================
@@ -437,10 +459,10 @@ platform :android do
     prepare_fastlane_directories
     artifacts = {}
 
-    [ANDROID_APK_PATH, ANDROID_AAB_PATH].each do |path|
+    [actual_apk_path, actual_aab_path].uniq.each do |path|
       next unless File.exist?(path)
 
-       # Convert absolute path to a clean relative path from PROJECT_ROOT
+      # Convert absolute path to a clean relative path from PROJECT_ROOT
       rel_path = Pathname.new(path).relative_path_from(Pathname.new(PROJECT_ROOT)).to_s
 
       if File.file?(path)
@@ -536,6 +558,7 @@ platform :android do
       )
 
       copy_artifact(source: source_apk, destination: named_apk)
+      @named_apk_path = named_apk
     end
   end
 
@@ -562,6 +585,7 @@ platform :android do
     )
 
     copy_artifact(source: ANDROID_AAB_PATH, destination: named_aab)
+    @named_aab_path = named_aab
   end
 
   # ===========================================================================
@@ -583,7 +607,7 @@ platform :android do
                    UI.user_error!("Neither 'aapt2' nor 'aapt' command was found.")
                  end
 
-      output = sh("#{aapt_cmd} dump badging #{ANDROID_APK_PATH.shellescape}")
+      output = sh("#{aapt_cmd} dump badging #{actual_apk_path.shellescape}")
 
       package_match      = output.match(/package:\s+name='([^']+)'/)
       version_name_match = output.match(/versionName='([^']+)'/)
@@ -614,7 +638,7 @@ platform :android do
       else
         require_command(command: "java")
         require_file(path: bundletool_path, name: "bundletool binary")
-        sh("java -jar #{bundletool_path.shellescape} validate --bundle=#{ANDROID_AAB_PATH.shellescape}")
+        sh("java -jar #{bundletool_path.shellescape} validate --bundle=#{actual_aab_path.shellescape}")
       end
 
     else
@@ -631,7 +655,7 @@ platform :android do
     when "apk"
       validate_apk_artifact
       require_command(command: "apksigner")
-      sh("apksigner verify --verbose --print-certs #{ANDROID_APK_PATH.shellescape}")
+      sh("apksigner verify --verbose --print-certs #{actual_apk_path.shellescape}")
       UI.success("APK signing validation passed.")
 
     when "aab"
@@ -799,7 +823,7 @@ platform :android do
       app: firebase_android_app_id,
       service_credentials_file: service_account_path,
       android_artifact_type: "AAB",
-      android_artifact_path: ANDROID_AAB_PATH,
+      android_artifact_path: actual_aab_path,
       release_notes: read_release_notes
     }
 
@@ -824,7 +848,7 @@ platform :android do
 
     upload_to_play_store(
       track: track,
-      aab: ANDROID_AAB_PATH,
+      aab: actual_aab_path,
       release_status: release_status,
       json_key: service_account_path,
       skip_upload_apk: true,

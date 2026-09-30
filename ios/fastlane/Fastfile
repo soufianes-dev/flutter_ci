@@ -69,13 +69,9 @@ platform :ios do
     ENV["APP_STORE_CONNECT_KEY_PATH"].to_s.strip
   end
 
-  def api_base_url
-    ENV["API_BASE_URL"].to_s.strip
-  end
-
-  def require_api_base_url!
-    url = api_base_url
-    if url.empty?
+  def api_base_url(required: false)
+    url = ENV["API_BASE_URL"].to_s.strip
+    if url.empty? && required
       UI.user_error!("API_BASE_URL environment variable is required.")
     end
     url
@@ -246,7 +242,7 @@ platform :ios do
       "DEPENDENCY_LOCK_HASH" => lock_hash,
       "SIGNING_CERTIFICATE"  => signing_cert,
       "DEVICE_COMPATIBILITY" => device_compat,
-      "API_BASE_URL"         => require_api_base_url!,
+      "API_BASE_URL"         => api_base_url(required: false),
       "GIT_SHA"              => git_commit_sha,
       "GIT_BRANCH"           => git_branch_name,
       "BUILD_TIMESTAMP"      => Time.now.utc.iso8601

@@ -147,14 +147,14 @@ jobs:
       - name: Upload App Bundle
         uses: actions/upload-artifact@v7
         with:
-          path: build/app/outputs/bundle/release/*.aab
+          path: build/app/outputs/bundle/release/${{ env.APP_NAME }}*.aab
           archive: false
           retention-days: 90
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v7
         with:
-          path: build/app/outputs/flutter-apk/*.apk*
-          archive: false
+          name: android-apks
+          path: build/app/outputs/flutter-apk/${{ env.APP_NAME }}*.apk
           retention-days: 90
       - name: Upload Android build manifest
         uses: actions/upload-artifact@v7
