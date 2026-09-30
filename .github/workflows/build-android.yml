@@ -24,7 +24,7 @@ on:
 env:
   FLUTTER_VERSION: "3.47.5"
   FLUTTER_CHANNEL: "stable"
-  JAVA_VERSION: "11"
+  JAVA_VERSION: "17"
   JAVA_DISTRIBUTION: "temurin"
   RUBY_VERSION: "3.3"
   WORKING_DIR: "android"
@@ -135,7 +135,7 @@ jobs:
           CI_PIPELINE_ID: ${{ github.run_id }}
           BUILD_HOST: ${{ runner.name }}
         run: |
-          fastlane add_plugin firebase_app_distribution
+          bundle exec fastlane add_plugin firebase_app_distribution
           bundle install
           bundle exec fastlane build_all_android_artifacts
 
