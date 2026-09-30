@@ -140,7 +140,7 @@ jobs:
       - name: Upload build manifest
         uses: actions/upload-artifact@v7
         with:
-          path: .fastlane/build_manifest.json
+          path: ios_build_manifest.json
           archive: false
           retention-days: 60
       - name: Install iOS app on simulator

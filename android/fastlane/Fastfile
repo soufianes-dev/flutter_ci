@@ -44,7 +44,7 @@ platform :android do
     ENV["FIREBASE_TESTERS"].to_s.strip
   end
 
-  def api_base_url(required: true)
+  def api_base_url(required: false)
     url = ENV["API_BASE_URL"].to_s.strip
     if url.empty? && required
       UI.user_error!("API_BASE_URL environment variable is required.")
