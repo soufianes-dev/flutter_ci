@@ -119,6 +119,7 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+          working-directory: ${{ env.WORKING_DIR }}
       # TODO:
       - name: Build with Fastlane
         env:
@@ -135,8 +136,8 @@ jobs:
           CI_PIPELINE_ID: ${{ github.run_id }}
           BUILD_HOST: ${{ runner.name }}
         run: |
-          bundle exec fastlane add_plugin firebase_app_distribution
-          bundle install
+          # bundle exec fastlane add_plugin firebase_app_distribution
+          # bundle install
           bundle exec fastlane build_all_android_artifacts
 
           # Validate flutter-ci-432e4-b2e456c83eaa.json
