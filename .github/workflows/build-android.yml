@@ -147,8 +147,8 @@ jobs:
       - name: Upload App Bundle
         uses: actions/upload-artifact@v7
         with:
+          name: android-abbs
           path: build/app/outputs/bundle/release/*.aab
-          archive: false
           retention-days: 90
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v7
