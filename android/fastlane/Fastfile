@@ -479,7 +479,6 @@ platform :android do
       "git_branch"           => git_branch_name,
       "build_timestamp"      => Time.now.utc.iso8601,
       "flutter_version"      => flutter_version_info,
-      "xcode_version"        => xcode_version_info,
       "artifacts"            => artifacts
     }
 
