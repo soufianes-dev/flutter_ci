@@ -1,4 +1,4 @@
-name: Build iOS 
+name: Build iOS
 on:
   workflow_dispatch:
   # push:
@@ -91,7 +91,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
-          flutter-version: ${{ env.FLUTTER_VERSION }}          
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6
