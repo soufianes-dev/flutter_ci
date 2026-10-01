@@ -12,7 +12,7 @@ permissions:
 env:
   APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutterci"
-  FLUTTER_VERSION: "3.47.5"
+  FLUTTER_VERSION: "3.47.6"
   FLUTTER_CHANNEL: "stable"
 jobs:
   build-macos:

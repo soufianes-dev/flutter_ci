@@ -6,7 +6,7 @@ on:
   # Enable manual run through GitHub UI
   workflow_dispatch:
 env:
-  FLUTTER_VERSION: "3.47.5"
+  FLUTTER_VERSION: "3.47.6"
   FLUTTER_CHANNEL: "stable"
 jobs:
   build-wasm:
@@ -45,7 +45,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
-          flutter-version: ${{ env.FLUTTER_VERSION }}          
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Cache pub dependencies
         uses: actions/cache@v6

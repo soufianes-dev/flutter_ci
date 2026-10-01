@@ -13,7 +13,7 @@ env:
   APP_TITLE: "FlutterCI"
   APP_PUBLISHER: "Soufiane Saadouni"
   IDENTIFIER: "dev.soufianes.flutterci"
-  FLUTTER_VERSION: "3.47.5"
+  FLUTTER_VERSION: "3.47.6"
   FLUTTER_CHANNEL: "stable"
 jobs:
   build-windows:
@@ -623,12 +623,7 @@ jobs:
 
       #     Write-Host "✅ Published $env:MSIX_FILE to Microsoft Store successfully."
 
-
-
-
-
-
-      # TODO: Yo must build the arm64 and x64 .msix files and put them in a folder called msix_packages 
+      # TODO: Yo must build the arm64 and x64 .msix files and put them in a folder called msix_packages
       # So they got compiled to a MyApp.msixbundle
       # - name:  Create MSIX bundle
       #   shell: pwsh
