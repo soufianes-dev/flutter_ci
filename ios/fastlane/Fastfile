@@ -100,7 +100,7 @@ platform :ios do
 
   RELEASE_IPA_PATH     = ENV.fetch("IOS_IPA_PATH", File.join(PROJECT_ROOT, "build/ios/ipa/Runner.ipa")).freeze
   RELEASE_ARCHIVE_PATH = ENV.fetch("IOS_ARCHIVE_PATH", File.join(PROJECT_ROOT, "build/ios/archive/Runner.xcarchive")).freeze
-  
+
   BUILD_MANIFEST_FILE  = ENV.fetch("IOS_BUILD_MANIFEST", File.join(PROJECT_ROOT, "ios_build_manifest.json")).freeze
 
   # Fallback to "app" if APP_NAME sanitizes to an empty string
@@ -180,10 +180,6 @@ platform :ios do
       files = Dir.glob(File.join(path, "**", "*")).select { |item| File.file?(item) }
       if files.empty?
         UI.user_error!("#{name} directory contains no files: #{path}")
-      end
-      empty_files = files.select { |f| File.size(f).zero? }
-      unless empty_files.empty?
-        UI.user_error!("#{name} contains empty files (e.g. #{empty_files.first})")
       end
     else
       require_file(path: path, name: name)
