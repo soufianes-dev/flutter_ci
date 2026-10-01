@@ -373,7 +373,7 @@ platform :ios do
   end
 
   private_lane :validate_flutter_configuration do
-    require_file(path: "pubspec.yaml", name: "pubspec.yaml")
+    require_file(path: File.join(PROJECT_ROOT, "pubspec.yaml"), name: "pubspec.yaml")
 
     lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
     if File.exist?(lockfile_path)
@@ -493,7 +493,7 @@ platform :ios do
   private_lane :run_tests_with_coverage do
     UI.message("Running Flutter tests with coverage...")
     sh("flutter", "test", "--coverage")
-    require_file(path: "coverage/lcov.info", name: "Flutter coverage report")
+    require_file(path: File.join(PROJECT_ROOT, "coverage/lcov.info"), name: "Flutter coverage report")
     UI.success("Flutter coverage generated.")
   end
 
