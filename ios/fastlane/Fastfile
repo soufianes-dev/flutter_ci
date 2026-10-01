@@ -77,12 +77,6 @@ platform :ios do
     flavor
   end
 
-  # Project Paths & Directory Configuration
-  IOS_PROJECT_DIR      = "./ios".freeze
-  XCODEPROJ_PATH       = File.join(IOS_PROJECT_DIR, "Runner.xcodeproj").freeze
-  XCODE_WORKSPACE_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcworkspace").freeze
-  OUTPUT_DIR           = ENV.fetch("IOS_OUTPUT_DIR", "build/ios").freeze
-  DEBUG_INFO_DIRECTORY = ENV.fetch("DEBUG_INFO_DIRECTORY", "symbols/ios").freeze
   PROJECT_ROOT = begin
     dir = __dir__
     while dir != "/" && !File.exist?(File.join(dir, "pubspec.yaml"))
@@ -91,15 +85,22 @@ platform :ios do
     dir
   end.freeze
 
+  # Project Paths & Directory Configuration
+  IOS_PROJECT_DIR      = File.join(PROJECT_ROOT, "ios").freeze
+  XCODEPROJ_PATH       = File.join(IOS_PROJECT_DIR, "Runner.xcodeproj").freeze
+  XCODE_WORKSPACE_PATH = File.join(IOS_PROJECT_DIR, "Runner.xcworkspace").freeze
+  OUTPUT_DIR           = ENV.fetch("IOS_OUTPUT_DIR", File.join(PROJECT_ROOT, "build/ios")).freeze
+  DEBUG_INFO_DIRECTORY = ENV.fetch("DEBUG_INFO_DIRECTORY", File.join(PROJECT_ROOT, "symbols/ios")).freeze
+
   SIMULATOR_APP_PATH   = ENV.fetch("IOS_SIMULATOR_APP_PATH", File.join(PROJECT_ROOT, "build/ios/iphonesimulator/Runner.app")).freeze
   DEBUG_APP_PATH       = ENV.fetch("IOS_DEBUG_APP_PATH", File.join(PROJECT_ROOT, "build/ios/iphoneos/Runner.app")).freeze
   FIREBASE_OUTPUT_DIR  = ENV.fetch("FIREBASE_OUTPUT_DIR", File.join(PROJECT_ROOT, "build/ios/firebase")).freeze
   FIREBASE_IPA_PATH    = ENV.fetch("FIREBASE_IPA_PATH", File.join(FIREBASE_OUTPUT_DIR, "ios", "ipa", "Runner.ipa")).freeze
   FIREBASE_ARCHIVE_PATH = ENV.fetch("FIREBASE_ARCHIVE_PATH", File.join(FIREBASE_OUTPUT_DIR, "ios", "archive", "Runner.xcarchive")).freeze
 
-  RELEASE_IPA_PATH     = ENV.fetch("IOS_IPA_PATH", "build/ios/ipa/Runner.ipa").freeze
-  RELEASE_ARCHIVE_PATH = ENV.fetch("IOS_ARCHIVE_PATH", "build/ios/archive/Runner.xcarchive").freeze
-
+  RELEASE_IPA_PATH     = ENV.fetch("IOS_IPA_PATH", File.join(PROJECT_ROOT, "build/ios/ipa/Runner.ipa")).freeze
+  RELEASE_ARCHIVE_PATH = ENV.fetch("IOS_ARCHIVE_PATH", File.join(PROJECT_ROOT, "build/ios/archive/Runner.xcarchive")).freeze
+  
   BUILD_MANIFEST_FILE  = ENV.fetch("IOS_BUILD_MANIFEST", File.join(PROJECT_ROOT, "ios_build_manifest.json")).freeze
 
   # Fallback to "app" if APP_NAME sanitizes to an empty string
