@@ -342,12 +342,12 @@ jobs:
         run: |
           brew install ffmpeg
           npm install -g appium
-          appium driver install mac2
+          npx appium driver install mac2
           pip install Appium-Python-Client
 
       - name: Start Appium Server
         run: |
-          appium --log-no-colors > appium.log 2>&1 &
+          npx appium --log-no-colors > appium.log 2>&1 &
           until curl -s http://127.0.0.1:4723/status; do
             echo "Waiting for Appium server..."
             sleep 2
