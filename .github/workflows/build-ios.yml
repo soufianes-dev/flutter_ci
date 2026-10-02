@@ -86,6 +86,9 @@ jobs:
           # Force software rendering to avoid hardware acceleration issues
           defaults write com.apple.CoreSimulator.${{ env.DEVICE_ID }} FramebufferEmulationMode -int 2 || echo "Failed to set software rendering, continuing with default"
 
+          # Enable touch indicators in simulator video recordings
+          defaults write com.apple.CoreSimulator.SimDevice.${{ env.DEVICE_ID }}.LaunchConfig CustomEnvironment -dict SIMULATOR_MAINSCREEN_SHOW_TOUCHES 1
+
           xcrun simctl bootstatus ${{ env.DEVICE_ID }} -b
           xcrun simctl list devices | grep Booted # Visible confirmation in the log
       - name: Set up Flutter SDK
@@ -173,18 +176,30 @@ jobs:
         run: |
           mkdir -p maestro/recordings maestro/maestro_outputs
 
-          ~/.maestro/bin/maestro record \
+          # Start native simctl background recording (H.264 high speed)
+          xcrun simctl io booted recordVideo --codec=h264 maestro/recordings/app_flow.mp4 &
+          RECORD_PID=$!
+
+          # Run maestro test without recording CLI overhead
+          ~/.maestro/bin/maestro test \
             -e APP_ID=${{ env.APP_IDENTIFIER }} \
-            --local maestro/flows/main.yaml maestro/recordings/app_flow.mp4
+            maestro/flows/main.yaml || TEST_EXIT_CODE=$?
+
+          # Gracefully stop video recording
+          kill -INT $RECORD_PID 2>/dev/null || true
+          wait $RECORD_PID 2>/dev/null || true
 
           # Collect screenshots wherever Maestro dropped them
           find . -path ./maestro -prune -o -maxdepth 3 -name '*.png' -print -exec mv {} maestro/maestro_outputs/ \;
 
           if [ -n "$(ls -A maestro/maestro_outputs 2>/dev/null)" ]; then
             zip -r maestro/maestro_outputs.zip maestro/maestro_outputs/
-          else
-            echo "No screenshots found, skipping zip"
           fi
+
+          if [ "${TEST_EXIT_CODE:-0}" -ne 0 ]; then
+            exit $TEST_EXIT_CODE
+          fi
+
           ls -la maestro/recordings maestro/maestro_outputs
       - name: Upload Maestro outputs
         if: always()
