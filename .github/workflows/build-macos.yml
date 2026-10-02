@@ -326,3 +326,94 @@ jobs:
           archive: false
           retention-days: 30
           if-no-files-found: error
+
+      # NOTE: AI OUTPUT
+      - name: Setup Node.js & Python
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg & Appium Mac2Driver
+        run: |
+          brew install ffmpeg
+          npm install -g appium
+          appium driver install mac2
+          pip install Appium-Python-Client
+
+      - name: Start Appium Server
+        run: |
+          appium --log-no-colors > appium.log 2>&1 &
+          until curl -s http://127.0.0.1:4723/status; do
+            echo "Waiting for Appium server..."
+            sleep 2
+          done
+          echo "Appium Server running!"
+
+      # --------------------------------------------------
+      # APP 1: PKG INSTALLATION & AUTOMATION
+      # --------------------------------------------------
+      - name: Install PKG App
+        run: |
+          sudo installer -pkg ${{ env.PKG_NAME }} -target /
+
+      - name: Record & Test PKG App
+        run: |
+          # Start HW-accelerated screen recording in background
+          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "1:none" \
+            -c:v h264_videotoolbox -b:v 2M pkg_execution.mp4 &
+          FFMPEG_PID=$!
+
+          # Run Appium Test Flow for PKG
+          export APP_ID="dev.soufianes.flutterci"
+          export OUTPUT_DIR="./pkg_screenshots"
+          python test_flow.py
+
+          # Stop recording gracefully
+          kill -INT $FFMPEG_PID
+          wait $FFMPEG_PID || true
+
+      # --------------------------------------------------
+      # APP 2: DMG MOUNTING & AUTOMATION
+      # --------------------------------------------------
+      - name: Mount & Extract DMG App
+        run: |
+          hdiutil attach ${{ env.DMG_NAME }} -mountpoint /Volumes/AppDMG
+          cp -R /Volumes/AppDMG/*.app /Applications/
+          hdiutil detach /Volumes/AppDMG
+
+      - name: Record & Test DMG App
+        run: |
+          # Start HW-accelerated screen recording in background
+          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "1:none" \
+            -c:v h264_videotoolbox -b:v 2M dmg_execution.mp4 &
+          FFMPEG_PID=$!
+
+          # Run Appium Test Flow for DMG
+          export APP_ID="dev.soufianes.flutterci"
+          export OUTPUT_DIR="./dmg_screenshots"
+          python test_flow.py
+
+          # Stop recording gracefully
+          kill -INT $FFMPEG_PID
+          wait $FFMPEG_PID || true
+
+      # --------------------------------------------------
+      # ARTIFACT UPLOAD
+      # --------------------------------------------------
+      - name: Upload Videos & Screenshots as Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-app-recordings
+          path: |
+            pkg_execution.mp4
+            dmg_execution.mp4
+            pkg_screenshots/
+            dmg_screenshots/
+            appium.log
+          retention-days: 7
