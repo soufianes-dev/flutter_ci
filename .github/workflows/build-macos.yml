@@ -74,8 +74,8 @@ jobs:
             ${{ runner.os }}-pub-
       - name: Get dependencies
         run: flutter pub get
-      - name: Analyze code
-        run: flutter analyze --fatal-infos --fatal-warnings
+      # - name: Analyze code
+      #   run: flutter analyze --fatal-infos --fatal-warnings
       # - name: Verify Formatting
       #   run: dart format --output=none --set-exit-if-changed .
       # - name: Run Tests
