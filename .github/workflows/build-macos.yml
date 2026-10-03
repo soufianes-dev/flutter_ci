@@ -344,7 +344,11 @@ jobs:
           npm install -g appium
           npx appium driver install mac2
           pip install Appium-Python-Client
-
+      - name: Grant Accessibility Privileges
+        run: |
+          # Enable Accessibility for Terminal/Node runner in macOS TCC
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','com.apple.Terminal',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,1700000000);" || true
       - name: Start Appium Server
         run: |
           npx appium --log-no-colors > appium.log 2>&1 &
@@ -382,6 +386,9 @@ jobs:
       # --------------------------------------------------
       - name: Mount & Extract DMG App
         run: |
+          # Remove previous PKG installation before mounting DMG
+          sudo rm -rf "/Applications/${{ env.APP_NAME }}.app"
+
           hdiutil attach ${{ env.DMG_NAME }} -mountpoint /Volumes/AppDMG
           cp -R /Volumes/AppDMG/*.app /Applications/
           hdiutil detach /Volumes/AppDMG

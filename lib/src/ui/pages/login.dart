@@ -59,6 +59,7 @@ class _LoginState extends State<Login> {
                             label: "email",
                             container: true,
                             textField: true,
+                            explicitChildNodes: true,
                             child: TextFormField(
                               key: Key("email"),
                               controller: _emailController,
@@ -86,6 +87,7 @@ class _LoginState extends State<Login> {
                             label: "password",
                             container: true,
                             textField: true,
+                            explicitChildNodes: true,
                             child: TextFormField(
                               key: Key("password"),
                               controller: _passwordController,
