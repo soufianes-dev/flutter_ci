@@ -330,22 +330,7 @@ jobs:
         run: brew install ffmpeg
       - name: Record & run integration tests
         run: |
-          set -e
-
-          # Start video recording in background
-          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
-            -c:v h264_videotoolbox -b:v 2M integration_test_execution.mp4 >/dev/null 2>&1 & FFMPEG_PID=$!
-
-          # Run tests and capture exit code
-          TEST_EXIT_CODE=0
-          flutter test integration_test/login_flow_test.dart -d macos || TEST_EXIT_CODE=$?
-
-          # Stop recording gracefully
-          kill -INT $FFMPEG_PID || true
-          wait $FFMPEG_PID || true
-
-          exit $TEST_EXIT_CODE
-
+          flutter test integration_test/login_flow_test.dart -d macos
       - name: Upload recording
         uses: actions/upload-artifact@v7
         if: always()
