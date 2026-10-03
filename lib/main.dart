@@ -33,7 +33,7 @@ void main() {
 
   // Note: Flutter desktop apps disable their accessibility semantics by default to save performance
   // Forces Flutter to expose UI elements to macOS Accessibility / Appium
-  SemanticsBinding.instance.ensureSemantics();
+  // SemanticsBinding.instance.ensureSemantics();
 
   runApp(const App());
 }
