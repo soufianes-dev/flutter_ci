@@ -44,69 +44,78 @@ class _LoginState extends State<Login> {
                         crossAxisAlignment: .center,
                         children: [
                           const SizedBox(height: 16.0),
-                          Text(
-                            key: Key("login"),
-                            "Login",
-                            style: Theme.of(context).textTheme.titleLarge,
+                          Semantics(
+                            identifier: "login",
+                            child: Text(
+                              key: Key("login"),
+                              "Login",
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
                           ),
                           const SizedBox(height: 16.0),
-                          TextFormField(
-                            key: Key("email"),
-                            controller: _emailController,
-                            textInputAction: .next,
-                            keyboardType: .emailAddress,
-                            autofillHints: [
-                              AutofillHints.email,
-                              AutofillHints.username,
-                            ],
-                            decoration: const .new(
-                              label: Text("Email"),
-                              hintText: "example@mail.com",
-                              border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.email_outlined),
+                          Semantics(
+                            identifier: "email",
+                            child: TextFormField(
+                              key: Key("email"),
+                              controller: _emailController,
+                              textInputAction: .next,
+                              keyboardType: .emailAddress,
+                              autofillHints: [
+                                AutofillHints.email,
+                                AutofillHints.username,
+                              ],
+                              decoration: const .new(
+                                label: Text("Email"),
+                                hintText: "example@mail.com",
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.email_outlined),
+                              ),
+                              validator: (value) {
+                                //if (value!.trim().isEmpty){}
+                                return null;
+                              },
                             ),
-                            validator: (value) {
-                              //if (value!.trim().isEmpty){}
-                              return null;
-                            },
                           ),
                           const SizedBox(height: 16.0),
-                          TextFormField(
-                            key: Key("password"),
-                            controller: _passwordController,
-                            textInputAction: .send,
-                            keyboardType: .visiblePassword,
-                            obscureText: _isPasswordVisible,
-                            autofillHints: [AutofillHints.password],
-                            decoration: .new(
-                              label: const Text("Password"),
-                              hintText: _isPasswordVisible
-                                  ? 'Password'
-                                  : "********",
-                              border: const OutlineInputBorder(),
-                              prefixIcon: const Icon(Icons.key_outlined),
-                              suffixIcon: _isPasswordVisible
-                                  ? IconButton(
-                                      icon: const Icon(Icons.visibility),
-                                      onPressed: () {
-                                        setState(
-                                          () => _isPasswordVisible = false,
-                                        );
-                                      },
-                                    )
-                                  : IconButton(
-                                      icon: const Icon(Icons.visibility_off),
-                                      onPressed: () {
-                                        setState(
-                                          () => _isPasswordVisible = true,
-                                        );
-                                      },
-                                    ),
+                          Semantics(
+                            identifier: "password",
+                            child: TextFormField(
+                              key: Key("password"),
+                              controller: _passwordController,
+                              textInputAction: .send,
+                              keyboardType: .visiblePassword,
+                              obscureText: _isPasswordVisible,
+                              autofillHints: [AutofillHints.password],
+                              decoration: .new(
+                                label: const Text("Password"),
+                                hintText: _isPasswordVisible
+                                    ? 'Password'
+                                    : "********",
+                                border: const OutlineInputBorder(),
+                                prefixIcon: const Icon(Icons.key_outlined),
+                                suffixIcon: _isPasswordVisible
+                                    ? IconButton(
+                                        icon: const Icon(Icons.visibility),
+                                        onPressed: () {
+                                          setState(
+                                            () => _isPasswordVisible = false,
+                                          );
+                                        },
+                                      )
+                                    : IconButton(
+                                        icon: const Icon(Icons.visibility_off),
+                                        onPressed: () {
+                                          setState(
+                                            () => _isPasswordVisible = true,
+                                          );
+                                        },
+                                      ),
+                              ),
+                              validator: (value) {
+                                //if (value!.trim().isEmpty){}
+                                return null;
+                              },
                             ),
-                            validator: (value) {
-                              //if (value!.trim().isEmpty){}
-                              return null;
-                            },
                           ),
                           const SizedBox(height: 8.0),
                           RichText(
@@ -123,21 +132,24 @@ class _LoginState extends State<Login> {
                             ),
                           ),
                           const SizedBox(height: 16.0),
-                          FilledButton(
-                            key: Key("submit"),
-                            style: FilledButton.styleFrom(
-                              minimumSize: const Size.fromHeight(50.0),
-                              shape: const LinearBorder(),
+                          Semantics(
+                            identifier: "submit",
+                            child: FilledButton(
+                              key: Key("submit"),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(50.0),
+                                shape: const LinearBorder(),
+                              ),
+                              onPressed: () async {
+                                //GoRouter.of(context).pushReplacement('/wrapper');
+                                //context.go('/dashboard');
+                                if (_formKey.currentState!.validate()) {
+                                  context.pushReplacement('/welcome');
+                                  log(_emailController.text.trim());
+                                }
+                              },
+                              child: const Text("submit"),
                             ),
-                            onPressed: () async {
-                              //GoRouter.of(context).pushReplacement('/wrapper');
-                              //context.go('/dashboard');
-                              if (_formKey.currentState!.validate()) {
-                                context.pushReplacement('/welcome');
-                                log(_emailController.text.trim());
-                              }
-                            },
-                            child: const Text("submit"),
                           ),
                           const SizedBox(height: 16.0),
 

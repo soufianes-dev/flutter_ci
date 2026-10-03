@@ -9,10 +9,13 @@ class const Welcome({super.key}) extends StatelessWidget {
         mainAxisSize: .min,
         children: [
           Center(
-            child: Text(
-              key: Key("welcome"),
-              "welcome",
-              style: .new(fontSize: 36.0),
+            child: Semantics(
+              identifier: "welcome",
+              child: Text(
+                key: Key("welcome"),
+                "welcome",
+                style: .new(fontSize: 36.0),
+              ),
             ),
           ),
           Expanded(
