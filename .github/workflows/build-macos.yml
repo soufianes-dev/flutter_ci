@@ -328,100 +328,111 @@ jobs:
           if-no-files-found: error
 
       # NOTE: AI OUTPUT
-      - name: Setup Node.js & Python
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install FFmpeg & Appium Mac2Driver
-        run: |
-          brew install ffmpeg
-          npm install -g appium
-          npx appium driver install mac2
-          pip install Appium-Python-Client
-      - name: Grant Accessibility Privileges
-        run: |
-          # Enable Accessibility for Terminal/Node runner in macOS TCC
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
-            "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','com.apple.Terminal',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,1700000000);" || true
-      - name: Start Appium Server
-        run: |
-          npx appium --log-no-colors > appium.log 2>&1 &
-          until curl -s http://127.0.0.1:4723/status; do
-            echo "Waiting for Appium server..."
-            sleep 2
-          done
-          echo "Appium Server running!"
+# --------------------------------------------------
+      # VIDEO RECORDING SETUP
+      # --------------------------------------------------
+      - name: Install FFmpeg
+        run: brew install ffmpeg
 
       # --------------------------------------------------
-      # APP 1: PKG INSTALLATION & AUTOMATION
+      # FLUTTER INTEGRATION TESTS WITH RECORDING
       # --------------------------------------------------
-      - name: Install PKG App
+      - name: Record & Run Integration Tests
         run: |
-          sudo installer -pkg ${{ env.PKG_NAME }} -target /
+          set -e
 
-      - name: Record & Test PKG App
-        run: |
-          # Start HW-accelerated screen recording in background
+          # Start video recording in background
           ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
-            -c:v h264_videotoolbox -b:v 2M pkg_execution.mp4 &
+            -c:v h264_videotoolbox -b:v 2M integration_test_execution.mp4 >/dev/null 2>&1 &
           FFMPEG_PID=$!
 
-          # Run Appium Test Flow for PKG
-          export APP_ID="dev.soufianes.flutterci"
-          export OUTPUT_DIR="./pkg_screenshots"
-          python test_flow.py
+          # Run tests and capture exit code
+          TEST_EXIT_CODE=0
+          flutter test integration_test/login_flow_test.dart -d macos || TEST_EXIT_CODE=$?
 
           # Stop recording gracefully
-          kill -INT $FFMPEG_PID
+          kill -INT $FFMPEG_PID || true
+          wait $FFMPEG_PID || true
+
+          exit $TEST_EXIT_CODE
+
+      # --------------------------------------------------
+      # APP 1: PKG INSTALLATION & RECORDING
+      # --------------------------------------------------
+      - name: Install & Record PKG App
+        run: |
+          set -euo pipefail
+          mkdir -p ./pkg_screenshots
+
+          # Start video recording
+          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
+            -c:v h264_videotoolbox -b:v 2M pkg_execution.mp4 >/dev/null 2>&1 &
+          FFMPEG_PID=$!
+
+          # Install and launch PKG
+          sudo installer -pkg "${{ env.PKG_NAME }}" -target /
+          open -a "/Applications/${{ env.APP_NAME }}.app"
+          sleep 5
+
+          # Verify process running and capture screenshot
+          pgrep -f "${{ env.APP_NAME }}" || { echo "❌ PKG App failed to launch"; exit 1; }
+          screencapture ./pkg_screenshots/pkg_launched.png
+
+          # Cleanup process
+          pkill -f "${{ env.APP_NAME }}" || true
+
+          # Stop video recording
+          kill -INT $FFMPEG_PID || true
           wait $FFMPEG_PID || true
 
       # --------------------------------------------------
-      # APP 2: DMG MOUNTING & AUTOMATION
+      # APP 2: DMG MOUNTING & RECORDING
       # --------------------------------------------------
-      - name: Mount & Extract DMG App
+      - name: Mount & Record DMG App
         run: |
-          # Remove previous PKG installation before mounting DMG
+          set -euo pipefail
+          mkdir -p ./dmg_screenshots
+
+          # Cleanup previous PKG installation
+          pkill -f "${{ env.APP_NAME }}" || true
           sudo rm -rf "/Applications/${{ env.APP_NAME }}.app"
 
-          hdiutil attach ${{ env.DMG_NAME }} -mountpoint /Volumes/AppDMG
+          # Start video recording
+          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
+            -c:v h264_videotoolbox -b:v 2M dmg_execution.mp4 >/dev/null 2>&1 &
+          FFMPEG_PID=$!
+
+          # Mount DMG, install, and launch
+          hdiutil attach "${{ env.DMG_NAME }}" -mountpoint /Volumes/AppDMG
           cp -R /Volumes/AppDMG/*.app /Applications/
           hdiutil detach /Volumes/AppDMG
 
-      - name: Record & Test DMG App
-        run: |
-          # Start HW-accelerated screen recording in background
-          # Change "1:none" to "0:none"
-          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
-            -c:v h264_videotoolbox -b:v 2M dmg_execution.mp4 &
-          FFMPEG_PID=$!
+          open -a "/Applications/${{ env.APP_NAME }}.app"
+          sleep 5
 
-          # Run Appium Test Flow for DMG
-          export APP_ID="dev.soufianes.flutterci"
-          export OUTPUT_DIR="./dmg_screenshots"
-          python test_flow.py
+          # Verify process running and capture screenshot
+          pgrep -f "${{ env.APP_NAME }}" || { echo "❌ DMG App failed to launch"; exit 1; }
+          screencapture ./dmg_screenshots/dmg_launched.png
 
-          # Stop recording gracefully
-          kill -INT $FFMPEG_PID
+          # Cleanup process
+          pkill -f "${{ env.APP_NAME }}" || true
+
+          # Stop video recording
+          kill -INT $FFMPEG_PID || true
           wait $FFMPEG_PID || true
 
       # --------------------------------------------------
       # ARTIFACT UPLOAD
       # --------------------------------------------------
-      - name: Upload Videos & Screenshots as Artifacts
+      - name: Upload Videos & Screenshots
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: macos-app-recordings
           path: |
+            integration_test_execution.mp4
             pkg_execution.mp4
             dmg_execution.mp4
             pkg_screenshots/
             dmg_screenshots/
-            appium.log
           retention-days: 7
