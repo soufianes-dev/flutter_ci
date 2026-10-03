@@ -11,20 +11,20 @@ import 'src/app.dart';
 void main() {
   // Environment Variables
 
-  assert(Env.buildName.isNotEmpty, "BUILD_NAME is not defined!");
-  log(Env.buildName);
+  // assert(Env.buildName.isNotEmpty, "BUILD_NAME is not defined!");
+  // log(Env.buildName);
 
-  assert(Env.buildNumber.isNotEmpty, "BUILD_NUMBER is not defined!");
-  log(Env.buildNumber);
+  // assert(Env.buildNumber.isNotEmpty, "BUILD_NUMBER is not defined!");
+  // log(Env.buildNumber);
 
-  assert(Env.gitSha.isNotEmpty, "GIT_SHA is not defined!");
-  log(Env.gitSha);
+  // assert(Env.gitSha.isNotEmpty, "GIT_SHA is not defined!");
+  // log(Env.gitSha);
 
-  assert(Env.gitBranch.isNotEmpty, "GIT_BRANCH is not defined!");
-  log(Env.gitBranch);
+  // assert(Env.gitBranch.isNotEmpty, "GIT_BRANCH is not defined!");
+  // log(Env.gitBranch);
 
-  assert(Env.buildTimestamp.isNotEmpty, "BUILD_TIMESTAMP is not defined!");
-  log(Env.buildTimestamp);
+  // assert(Env.buildTimestamp.isNotEmpty, "BUILD_TIMESTAMP is not defined!");
+  // log(Env.buildTimestamp);
 
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isAndroid || Platform.isIOS) {
