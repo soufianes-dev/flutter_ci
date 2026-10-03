@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+// import 'package:google_fonts/google_fonts.dart';
 
 // https://github.com/material-foundation/flutter-packages/issues/67
 
@@ -8,7 +8,7 @@ final lightTheme = ThemeData(
   useMaterial3: true,
   // https://github.com/material-foundation/flutter-packages/issues/67
   // ThemeData.light().textTheme or ThemeData(brightness: Brightness.light).textTheme
-  textTheme: GoogleFonts.ubuntuTextTheme(ThemeData.light().textTheme),
+  // textTheme: GoogleFonts.ubuntuTextTheme(ThemeData.light().textTheme),
   colorScheme: const ColorScheme.light(
     brightness: Brightness.light,
     primary: Color(0xFF26547C),
@@ -47,7 +47,7 @@ final darkTheme = ThemeData(
   useMaterial3: true,
   // https://github.com/material-foundation/flutter-packages/issues/67
   // ThemeData.dark().textTheme or ThemeData(brightness: Brightness.dark).textTheme
-  textTheme: GoogleFonts.ubuntuTextTheme(ThemeData.dark().textTheme),
+  // textTheme: GoogleFonts.ubuntuTextTheme(ThemeData.dark().textTheme),
   colorScheme: const ColorScheme.dark(
     brightness: Brightness.dark,
     primary: Color(0xFF86BBD8),
