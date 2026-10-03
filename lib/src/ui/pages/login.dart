@@ -46,6 +46,7 @@ class _LoginState extends State<Login> {
                           const SizedBox(height: 16.0),
                           Semantics(
                             identifier: "login",
+                            label: "login",
                             child: Text(
                               key: Key("login"),
                               "Login",
@@ -55,6 +56,9 @@ class _LoginState extends State<Login> {
                           const SizedBox(height: 16.0),
                           Semantics(
                             identifier: "email",
+                            label: "email",
+                            container: true,
+                            textField: true,
                             child: TextFormField(
                               key: Key("email"),
                               controller: _emailController,
@@ -79,6 +83,9 @@ class _LoginState extends State<Login> {
                           const SizedBox(height: 16.0),
                           Semantics(
                             identifier: "password",
+                            label: "password",
+                            container: true,
+                            textField: true,
                             child: TextFormField(
                               key: Key("password"),
                               controller: _passwordController,
@@ -134,6 +141,9 @@ class _LoginState extends State<Login> {
                           const SizedBox(height: 16.0),
                           Semantics(
                             identifier: "submit",
+                            label: "submit",
+                            button: true,
+                            enabled: true,
                             child: FilledButton(
                               key: Key("submit"),
                               style: FilledButton.styleFrom(
