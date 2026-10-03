@@ -326,25 +326,15 @@ jobs:
           archive: false
           retention-days: 30
           if-no-files-found: error
-
-      # NOTE: AI OUTPUT
-# --------------------------------------------------
-      # VIDEO RECORDING SETUP
-      # --------------------------------------------------
       - name: Install FFmpeg
         run: brew install ffmpeg
-
-      # --------------------------------------------------
-      # FLUTTER INTEGRATION TESTS WITH RECORDING
-      # --------------------------------------------------
-      - name: Record & Run Integration Tests
+      - name: Record & run integration tests
         run: |
           set -e
 
           # Start video recording in background
           ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
-            -c:v h264_videotoolbox -b:v 2M integration_test_execution.mp4 >/dev/null 2>&1 &
-          FFMPEG_PID=$!
+            -c:v h264_videotoolbox -b:v 2M integration_test_execution.mp4 >/dev/null 2>&1 & FFMPEG_PID=$!
 
           # Run tests and capture exit code
           TEST_EXIT_CODE=0
@@ -356,83 +346,10 @@ jobs:
 
           exit $TEST_EXIT_CODE
 
-      # --------------------------------------------------
-      # APP 1: PKG INSTALLATION & RECORDING
-      # --------------------------------------------------
-      - name: Install & Record PKG App
-        run: |
-          set -euo pipefail
-          mkdir -p ./pkg_screenshots
-
-          # Start video recording
-          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
-            -c:v h264_videotoolbox -b:v 2M pkg_execution.mp4 >/dev/null 2>&1 &
-          FFMPEG_PID=$!
-
-          # Install and launch PKG
-          sudo installer -pkg "${{ env.PKG_NAME }}" -target /
-          open -a "/Applications/${{ env.APP_NAME }}.app"
-          sleep 5
-
-          # Verify process running and capture screenshot
-          pgrep -f "${{ env.APP_NAME }}" || { echo "❌ PKG App failed to launch"; exit 1; }
-          screencapture ./pkg_screenshots/pkg_launched.png
-
-          # Cleanup process
-          pkill -f "${{ env.APP_NAME }}" || true
-
-          # Stop video recording
-          kill -INT $FFMPEG_PID || true
-          wait $FFMPEG_PID || true
-
-      # --------------------------------------------------
-      # APP 2: DMG MOUNTING & RECORDING
-      # --------------------------------------------------
-      - name: Mount & Record DMG App
-        run: |
-          set -euo pipefail
-          mkdir -p ./dmg_screenshots
-
-          # Cleanup previous PKG installation
-          pkill -f "${{ env.APP_NAME }}" || true
-          sudo rm -rf "/Applications/${{ env.APP_NAME }}.app"
-
-          # Start video recording
-          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
-            -c:v h264_videotoolbox -b:v 2M dmg_execution.mp4 >/dev/null 2>&1 &
-          FFMPEG_PID=$!
-
-          # Mount DMG, install, and launch
-          hdiutil attach "${{ env.DMG_NAME }}" -mountpoint /Volumes/AppDMG
-          cp -R /Volumes/AppDMG/*.app /Applications/
-          hdiutil detach /Volumes/AppDMG
-
-          open -a "/Applications/${{ env.APP_NAME }}.app"
-          sleep 5
-
-          # Verify process running and capture screenshot
-          pgrep -f "${{ env.APP_NAME }}" || { echo "❌ DMG App failed to launch"; exit 1; }
-          screencapture ./dmg_screenshots/dmg_launched.png
-
-          # Cleanup process
-          pkill -f "${{ env.APP_NAME }}" || true
-
-          # Stop video recording
-          kill -INT $FFMPEG_PID || true
-          wait $FFMPEG_PID || true
-
-      # --------------------------------------------------
-      # ARTIFACT UPLOAD
-      # --------------------------------------------------
-      - name: Upload Videos & Screenshots
-        uses: actions/upload-artifact@v4
+      - name: Upload recording
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: macos-app-recordings
-          path: |
-            integration_test_execution.mp4
-            pkg_execution.mp4
-            dmg_execution.mp4
-            pkg_screenshots/
-            dmg_screenshots/
-          retention-days: 7
+          path: integration_test_execution.mp4
+          retention-days: 30
