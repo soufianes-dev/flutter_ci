@@ -389,8 +389,9 @@ jobs:
       - name: Record & Test DMG App
         run: |
           # Start HW-accelerated screen recording in background
-          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "1:none" \
-            -c:v h264_videotoolbox -b:v 2M dmg_execution.mp4 &
+          # Change "1:none" to "0:none"
+          ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "0:none" \
+            -c:v h264_videotoolbox -b:v 2M pkg_execution.mp4 &
           FFMPEG_PID=$!
 
           # Run Appium Test Flow for DMG

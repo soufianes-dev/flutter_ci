@@ -2,6 +2,7 @@ import 'dart:developer';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/rendering.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'env.dart';
@@ -25,11 +26,14 @@ void main() {
   assert(Env.buildTimestamp.isNotEmpty, "BUILD_TIMESTAMP is not defined!");
   log(Env.buildTimestamp);
 
-
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isAndroid || Platform.isIOS) {
     Firebase.initializeApp();
   }
+
+  // Note: Flutter desktop apps disable their accessibility semantics by default to save performance
+  // Forces Flutter to expose UI elements to macOS Accessibility / Appium
+  SemanticsBinding.instance.ensureSemantics();
 
   runApp(const App());
 }
