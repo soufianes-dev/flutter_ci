@@ -9,6 +9,7 @@ void main() {
 
   testWidgets('Complete login flow', (tester) async {
     // Start video recording in the background before launching the app
+    // NOTE in "macos/Runner/DebugProfile.entitlements" set <key>com.apple.security.app-sandbox</key> to false
     final ffmpegProcess = await Process.start('ffmpeg', [
       '-f',
       'avfoundation',
