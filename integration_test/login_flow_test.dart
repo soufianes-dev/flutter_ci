@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_ci/main.dart' as app;
@@ -10,21 +11,80 @@ void main() {
   testWidgets('Complete login flow', (tester) async {
     // Start video recording in the background before launching the app
     // NOTE in "macos/Runner/DebugProfile.entitlements" set <key>com.apple.security.app-sandbox</key> to false
-    final ffmpegProcess = await Process.start('ffmpeg', [
-      '-f',
-      'avfoundation',
-      '-capture_cursor',
-      '1',
-      '-framerate',
-      '30',
-      '-i',
-      '0:none',
-      '-c:v',
-      'h264_videotoolbox',
-      '-b:v',
-      '2M',
-      'integration_test_execution.mp4',
-    ]);
+    late final Process process;
+    if (Platform.isMacOS) {
+      process = await Process.start('ffmpeg', [
+        '-f',
+        'avfoundation',
+        '-capture_cursor',
+        '1',
+        '-framerate',
+        '30',
+        '-i',
+        '0:none',
+        '-c:v',
+        'h264_videotoolbox',
+        '-b:v',
+        '2M',
+        'integration_test_execution.mp4',
+      ]);
+    } else if (Platform.isWindows) {
+      process = await Process.start('ffmpeg', [
+        '-f',
+        'gdigrab',
+        '-framerate',
+        '30',
+        '-i',
+        'desktop',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-b:v',
+        '2M',
+        'integration_test_execution.mp4',
+      ]);
+    } else if (Platform.isLinux) {
+      final display = Platform.environment['DISPLAY'] ?? ':0.0';
+      // WSL
+      process = await Process.start('ffmpeg', [
+        '-f',
+        'x11grab',
+        '-framerate',
+        '30',
+        // '-video_size',
+        // '1920x1080', // Adjust to match WSL display resolution
+        '-i',
+        display,
+        '-c:v',
+        'libx264',
+        '-preset',
+        'ultrafast',
+        '-pix_fmt',
+        'yuv420p',
+        'integration_test_execution.mp4',
+      ]);
+
+      process.stderr.transform(utf8.decoder).listen((event) {
+        print('FFmpeg Error: $event');
+      });
+    } else if (Platform.isAndroid) {
+      // Start Android screen recording via ADB
+      process = await Process.start('adb', [
+        'shell',
+        'screenrecord',
+        '/sdcard/integration_test_execution.mp4',
+      ]);
+    } else if (Platform.isIOS) {
+      // Start iOS Simulator screen recording via xcrun simctl
+      process = await Process.start('xcrun', [
+        'simctl',
+        'io',
+        'booted',
+        'recordVideo',
+        'integration_test_execution.mp4',
+      ]);
+    }
 
     try {
       // 1. Launch app
@@ -47,11 +107,35 @@ void main() {
       // 5. Verify outcome
       expect(find.text('welcome'), findsOneWidget);
     } finally {
-      // Gracefully stop ffmpeg recording (equivalent to kill -INT)
-      ffmpegProcess.kill(.sigint);
+      if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+        // Gracefully stop ffmpeg recording (equivalent to kill -INT)
+        process.kill(.sigint);
 
-      // Wait for ffmpeg to finish writing and closing the video file
-      await ffmpegProcess.exitCode;
+        // Wait for ffmpeg to finish writing and closing the video file
+        await process.exitCode;
+      } else if (Platform.isAndroid) {
+        // Stop the screenrecord process gracefully (sends SIGINT / Ctrl+C)
+        process.kill(.sigint);
+        await process.exitCode;
+
+        // Pull the video file from the emulator and wait for it to finish
+        await Process.run('adb', [
+          'pull',
+          '/sdcard/integration_test_execution.mp4',
+          'integration_test_execution.mp4',
+        ]);
+        
+        // Clean up the temporary file from the device
+        await Process.run('adb', [
+          'shell',
+          'rm',
+          '/sdcard/integration_test_execution.mp4',
+        ]);
+      } else if (Platform.isIOS) {
+        // Stop simulator video recording process
+        process.kill(.sigint);
+        await process.exitCode;
+      }
     }
   });
 }
@@ -66,9 +150,8 @@ void main() {
 // xcrun simctl io booted screenshot screenshot.png
 
 // Record a video
-// xcrun simctl io booted recordVideo video.mp4 & & // Start command 
+// xcrun simctl io booted recordVideo video.mp4 & & // Start command
 // pkill -INT -f "simctl io" // End command
-
 
 // Android emulator (adb)
 // Pre-grant runtime permissions via ADB
