@@ -80,5 +80,3 @@ cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_
 cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_PACKAGE_NAME="dev.soufianes.flutterci" bundle exec fastlane build_android_apk
 
 cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_PACKAGE_NAME="dev.soufianes.flutterci" bundle exec fastlane build_all_android_artifacts
-
-cd android && APP_NAME="flutter_ci" BUILD_NAME="1.0.0" BUILD_NUMBER="1" ANDROID_PACKAGE_NAME="dev.soufianes.flutterci" bundle exec fastlane build_manifest
