@@ -73,7 +73,7 @@ void main() {
       process = await Process.start('adb', [
         'shell',
         'screenrecord',
-        '/sdcard/integration_test_execution.mp4',
+        '/data/local/tmp/integration_test_execution.mp4',
       ]);
     } else if (Platform.isIOS) {
       // Start iOS Simulator screen recording via xcrun simctl
@@ -121,15 +121,15 @@ void main() {
         // Pull the video file from the emulator and wait for it to finish
         await Process.run('adb', [
           'pull',
-          '/sdcard/integration_test_execution.mp4',
+          '/data/local/tmp/integration_test_execution.mp4',
           'integration_test_execution.mp4',
         ]);
-        
+
         // Clean up the temporary file from the device
         await Process.run('adb', [
           'shell',
           'rm',
-          '/sdcard/integration_test_execution.mp4',
+          '/data/local/tmp/integration_test_execution.mp4',
         ]);
       } else if (Platform.isIOS) {
         // Stop simulator video recording process
