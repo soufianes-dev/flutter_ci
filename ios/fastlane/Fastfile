@@ -101,7 +101,6 @@ platform :ios do
   RELEASE_IPA_PATH     = ENV.fetch("IOS_IPA_PATH", File.join(PROJECT_ROOT, "build/ios/ipa/Runner.ipa")).freeze
   RELEASE_ARCHIVE_PATH = ENV.fetch("IOS_ARCHIVE_PATH", File.join(PROJECT_ROOT, "build/ios/archive/Runner.xcarchive")).freeze
 
-  BUILD_MANIFEST_FILE  = ENV.fetch("IOS_BUILD_MANIFEST", File.join(PROJECT_ROOT, "ios_build_manifest.json")).freeze
 
   # Fallback to "app" if APP_NAME sanitizes to an empty string
   sanitized_app_name   = ENV.fetch("APP_NAME", "runner").downcase.gsub(/[^a-z0-9]+/, "-").sub(/\A-+/, "").sub(/-+\z/, "")
@@ -242,7 +241,6 @@ platform :ios do
 
   private_lane :prepare_fastlane_directories do
     [
-      File.dirname(BUILD_MANIFEST_FILE),
       OUTPUT_DIR,
       FIREBASE_OUTPUT_DIR
     ].each do |directory|
@@ -612,7 +610,7 @@ platform :ios do
   end
 
   # ===========================================================================
-  # Artifact Validation & Manifest Helpers
+  # Artifact Validation
   # ===========================================================================
 
   private_lane :validate_simulator_artifact do
@@ -631,65 +629,6 @@ platform :ios do
   private_lane :validate_release_artifact do
     validate_artifact(path: RELEASE_IPA_PATH, name: "App Store IPA")
     validate_artifact(path: RELEASE_ARCHIVE_PATH, name: "App Store archive")
-  end
-
-  private_lane :generate_build_manifest do |options|
-    options ||= {}
-    prepare_fastlane_directories
-    artifacts = {}
-
-    [SIMULATOR_APP_PATH, DEBUG_APP_PATH, FIREBASE_IPA_PATH, FIREBASE_ARCHIVE_PATH, RELEASE_IPA_PATH, RELEASE_ARCHIVE_PATH].each do |path|
-      next unless File.exist?(path)
-
-      # Convert absolute path to a clean relative path from PROJECT_ROOT
-      rel_path = Pathname.new(path).relative_path_from(Pathname.new(PROJECT_ROOT)).to_s
-
-      if File.file?(path)
-        artifacts[rel_path] = {
-          "type"       => "file",
-          "size_bytes" => File.size(path),
-          "sha256"     => Digest::SHA256.file(path).hexdigest
-        }
-      else
-        files = Dir.glob(File.join(path, "**", "*")).select { |item| File.file?(item) }
-        artifacts[rel_path] = {
-          "type"       => "directory",
-          "file_count" => files.length,
-          "size_bytes" => files.map { |file| File.size(file) }.reduce(0, :+)
-        }
-      end
-    end
-
-    if artifacts.empty?
-      UI.user_error!("No build artifacts found.")
-    end
-
-    lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
-
-    manifest = {
-      "platform"             => "ios",
-      "build_name"           => build_name,
-      "build_number"         => build_number,
-      "bundle_identifier"    => app_identifier,
-      "build_flavor"         => options[:flavor] || ENV.fetch("BUILD_FLAVOR", "dev"),
-      "build_type"           => options[:build_type] || ENV.fetch("BUILD_TYPE", "release"),
-      "dependency_lock_hash" => File.exist?(lockfile_path) ? Digest::SHA256.file(lockfile_path).hexdigest[0..11] : "no-lockfile",
-      "os_target"            => ENV.fetch("OS_TARGET", "ios-arm64"),
-      "signing_certificate"  => ENV.fetch("SIGNING_CERTIFICATE", "Apple Development/Automatic"),
-      "device_compatibility" => ENV.fetch("DEVICE_COMPATIBILITY", "iOS 14.0+"),
-      "git_sha"              => git_commit_sha,
-      "git_branch"           => git_branch_name,
-      "build_timestamp"      => Time.now.utc.iso8601,
-      "flutter_version"      => flutter_version_info,
-      "xcode_version"        => xcode_version_info,
-      "artifacts"            => artifacts
-    }
-
-    base_url = api_base_url
-    manifest["api_base_url"] = base_url unless base_url.empty?
-
-    File.write(BUILD_MANIFEST_FILE, JSON.pretty_generate(manifest) + "\n")
-    UI.success("Build manifest generated: #{BUILD_MANIFEST_FILE}")
   end
 
   private_lane :read_release_notes do |options|
@@ -894,7 +833,6 @@ platform :ios do
 
     install_flutter_dependencies
     build_simulator_artifact
-    generate_build_manifest(flavor: "dev", build_type: "debug")
   end
 
   desc "Build iOS Debug device application"
@@ -907,7 +845,6 @@ platform :ios do
 
     install_flutter_dependencies
     build_debug_device_artifact
-    generate_build_manifest(flavor: "dev", build_type: "debug")
   end
 
   desc "Build Firebase App Distribution Ad Hoc IPA"
@@ -921,7 +858,6 @@ platform :ios do
 
     install_flutter_dependencies
     build_firebase_ipa_artifact
-    generate_build_manifest(flavor: "dev", build_type: "debug")
 
     UI.success("Firebase App Distribution build artifact generated successfully.")
   end
@@ -937,7 +873,6 @@ platform :ios do
 
     install_flutter_dependencies
     build_appstore_ipa_artifact
-    generate_build_manifest(flavor: "production", build_type: "release")
   end
 
   desc "Build Simulator, Debug device, Firebase Ad Hoc IPA and signed App Store IPA"
@@ -954,8 +889,6 @@ platform :ios do
     build_debug_device_artifact
     build_firebase_ipa_artifact
     build_appstore_ipa_artifact
-
-    generate_build_manifest(flavor: "production", build_type: "release")
 
     UI.success("All iOS build artifacts generated successfully.")
   end

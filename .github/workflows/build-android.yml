@@ -156,13 +156,6 @@ jobs:
           name: android-apks
           path: build/app/outputs/flutter-apk/*.apk
           retention-days: 90
-      - name: Upload Android build manifest
-        uses: actions/upload-artifact@v7
-        with:
-          path: android_build_manifest.json
-          archive: false
-          retention-days: 30
-          if-no-files-found: error
       - name: Upload native debug symbols
         uses: actions/upload-artifact@v7
         with:

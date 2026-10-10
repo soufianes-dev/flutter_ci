@@ -141,12 +141,6 @@ jobs:
         with:
           path: build/ios/iphonesimulator # TODO
           retention-days: 60
-      - name: Upload build manifest
-        uses: actions/upload-artifact@v7
-        with:
-          path: ios_build_manifest.json
-          archive: false
-          retention-days: 60
       - name: Install iOS app on simulator
         run: |
           # Install onto the currently booted simulator

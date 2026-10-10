@@ -92,7 +92,6 @@ platform :android do
     dir
   end.freeze
 
-  BUILD_MANIFEST_FILE = ENV.fetch("ANDROID_BUILD_MANIFEST", File.join(PROJECT_ROOT, "android_build_manifest.json")).freeze
   ANDROID_APK_PATH = ENV.fetch("ANDROID_APK_PATH", File.join(PROJECT_ROOT, "build/app/outputs/flutter-apk/app-release.apk")).freeze
   ANDROID_AAB_PATH = ENV.fetch("ANDROID_AAB_PATH", File.join(PROJECT_ROOT, "build/app/outputs/bundle/release/app-release.aab")).freeze
   FIREBASE_GROUPS     = ENV.fetch("FIREBASE_GROUPS", "qa-team").freeze
@@ -192,14 +191,6 @@ platform :android do
     }
 
     defines.map { |k, v| "--dart-define=#{k}=#{v}" }
-  end
-
-  private_lane :prepare_fastlane_directories do
-    [
-      File.dirname(BUILD_MANIFEST_FILE),
-    ].each do |directory|
-      FileUtils.mkdir_p(directory)
-    end
   end
 
   # ===========================================================================
@@ -449,67 +440,6 @@ platform :android do
       sh("./gradlew lintRelease")
     end
     UI.success("Android lint passed.")
-  end
-
-  # ===========================================================================
-  # Build Manifest
-  # ===========================================================================
-
-  private_lane :generate_build_manifest do |options|
-    prepare_fastlane_directories
-    artifacts = {}
-
-    [actual_apk_path, actual_aab_path].uniq.each do |path|
-      next unless File.exist?(path)
-
-      # Convert absolute path to a clean relative path from PROJECT_ROOT
-      rel_path = Pathname.new(path).relative_path_from(Pathname.new(PROJECT_ROOT)).to_s
-
-      if File.file?(path)
-        artifacts[rel_path] = {
-          "type"       => "file",
-          "size_bytes" => File.size(path),
-          "sha256"     => Digest::SHA256.file(path).hexdigest
-        }
-      else
-        files = Dir.glob(File.join(path, "**", "*")).select { |item| File.file?(item) }
-        artifacts[rel_path] = {
-          "type"       => "directory",
-          "file_count" => files.length,
-          "size_bytes" => files.map { |file| File.size(file) }.reduce(0, :+)
-        }
-      end
-    end
-
-    if artifacts.empty?
-      UI.user_error!("No build artifacts found.")
-    end
-
-    lockfile_path = File.join(PROJECT_ROOT, "pubspec.lock")
-
-    manifest = {
-      "platform"             => "ios",
-      "build_name"           => build_name,
-      "build_number"         => build_number,
-      "build_flavor"         => options[:flavor] || ENV.fetch("BUILD_FLAVOR", "dev"),
-      "build_type"           => options[:build_type] || ENV.fetch("BUILD_TYPE", "release"),
-      "dependency_lock_hash" => File.exist?(lockfile_path) ? Digest::SHA256.file(lockfile_path).hexdigest[0..11] : "no-lockfile",
-      "os_target"            => ENV.fetch("OS_TARGET", "ios-arm64"),
-      "signing_certificate"  => ENV.fetch("SIGNING_CERTIFICATE", "Android Keystore/SHA256"),
-      "device_compatibility" => ENV.fetch("DEVICE_COMPATIBILITY", "iOS 14.0+"),
-      "git_sha"              => git_commit_sha,
-      "git_branch"           => git_branch_name,
-      "build_timestamp"      => Time.now.utc.iso8601,
-      "flutter_version"      => flutter_version_info,
-      "artifacts"            => artifacts
-    }
-
-    # Optional API URL backported from Android pattern
-    base_url = api_base_url
-    manifest["api_base_url"] = base_url unless base_url.empty?
-
-    File.write(BUILD_MANIFEST_FILE, JSON.pretty_generate(manifest) + "\n")
-    UI.success("Build manifest generated: #{BUILD_MANIFEST_FILE}")
   end
 
   # ===========================================================================
@@ -961,7 +891,7 @@ platform :android do
   end
 
   # ===========================================================================
-  # Public Lanes — BUILD LANES (Generates Artifacts & Manifest)
+  # Public Lanes — BUILD LANES (Generates Artifacts)
   # ===========================================================================
 
   desc "Build release APK"
@@ -976,7 +906,6 @@ platform :android do
     run_code_analysis
 
     build_release_apk
-    generate_build_manifest(options)
   end
 
   desc "Build release AAB"
@@ -991,7 +920,6 @@ platform :android do
     run_code_analysis
 
     build_release_aab
-    generate_build_manifest(options)
   end
 
   desc "Build APK and AAB"
@@ -1008,19 +936,12 @@ platform :android do
     build_release_apk
     build_release_aab
 
-    generate_build_manifest(options)
-
     UI.success("All Android build artifacts generated successfully.")
   end
 
   # ===========================================================================
-  # Public Lanes — Artifact Validation & Manifest Helpers
+  # Public Lanes — Artifact Validation
   # ===========================================================================
-
-  desc "Generate build manifest for existing Android artifacts"
-  lane :build_manifest do |options|
-    generate_build_manifest(options)
-  end
 
   desc "Validate release APK"
   lane :validate_apk do
