@@ -68,23 +68,24 @@ void main() {
       process.stderr.transform(utf8.decoder).listen((event) {
         print('FFmpeg Error: $event');
       });
-    } else if (Platform.isAndroid) {
-      // Start Android screen recording via ADB
-      process = await Process.start(Platform.isWindows ? 'adb.exe' : 'adb', [
-        'shell',
-        'screenrecord',
-        '/data/local/tmp/integration_test_execution.mp4',
-      ]);
-    } else if (Platform.isIOS) {
-      // Start iOS Simulator screen recording via xcrun simctl
-      process = await Process.start('xcrun', [
-        'simctl',
-        'io',
-        'booted',
-        'recordVideo',
-        'integration_test_execution.mp4',
-      ]);
     }
+    //  else if (Platform.isAndroid) {
+    //   // Start Android screen recording via ADB
+    //   process = await Process.start(Platform.isWindows ? 'adb.exe' : 'adb', [
+    //     'shell',
+    //     'screenrecord',
+    //     '/data/local/tmp/integration_test_execution.mp4',
+    //   ], runInShell: true);
+    // } else if (Platform.isIOS) {
+    //   // Start iOS Simulator screen recording via xcrun simctl
+    //   process = await Process.start('xcrun', [
+    //     'simctl',
+    //     'io',
+    //     'booted',
+    //     'recordVideo',
+    //     'integration_test_execution.mp4',
+    //   ]);
+    // }
 
     try {
       // 1. Launch app
@@ -113,29 +114,30 @@ void main() {
 
         // Wait for ffmpeg to finish writing and closing the video file
         await process.exitCode;
-      } else if (Platform.isAndroid) {
-        // Stop the screenrecord process gracefully (sends SIGINT / Ctrl+C)
-        process.kill(.sigint);
-        await process.exitCode;
-
-        // Pull the video file from the emulator and wait for it to finish
-        await Process.run(Platform.isWindows ? 'adb.exe' : 'adb', [
-          'pull',
-          '/data/local/tmp/integration_test_execution.mp4',
-          'integration_test_execution.mp4',
-        ]);
-
-        // Clean up the temporary file from the device
-        await Process.run(Platform.isWindows ? 'adb.exe' : 'adb', [
-          'shell',
-          'rm',
-          '/data/local/tmp/integration_test_execution.mp4',
-        ]);
-      } else if (Platform.isIOS) {
-        // Stop simulator video recording process
-        process.kill(.sigint);
-        await process.exitCode;
       }
+      //  else if (Platform.isAndroid) {
+      //   // Stop the screenrecord process gracefully (sends SIGINT / Ctrl+C)
+      //   process.kill(.sigint);
+      //   await process.exitCode;
+
+      //   // Pull the video file from the emulator and wait for it to finish
+      //   await Process.run(Platform.isWindows ? 'adb.exe' : 'adb', [
+      //     'pull',
+      //     '/data/local/tmp/integration_test_execution.mp4',
+      //     'integration_test_execution.mp4',
+      //   ], runInShell: true);
+
+      //   // Clean up the temporary file from the device
+      //   await Process.run(Platform.isWindows ? 'adb.exe' : 'adb', [
+      //     'shell',
+      //     'rm',
+      //     '/data/local/tmp/integration_test_execution.mp4',
+      //   ], runInShell: true);
+      // } else if (Platform.isIOS) {
+      //   // Stop simulator video recording process
+      //   process.kill(.sigint);
+      //   await process.exitCode;
+      // }
     }
   });
 }
