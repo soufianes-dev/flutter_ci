@@ -70,7 +70,7 @@ void main() {
       });
     } else if (Platform.isAndroid) {
       // Start Android screen recording via ADB
-      process = await Process.start('adb', [
+      process = await Process.start(Platform.isWindows ? 'adb.exe' : 'adb', [
         'shell',
         'screenrecord',
         '/data/local/tmp/integration_test_execution.mp4',
@@ -119,14 +119,14 @@ void main() {
         await process.exitCode;
 
         // Pull the video file from the emulator and wait for it to finish
-        await Process.run('adb', [
+        await Process.run(Platform.isWindows ? 'adb.exe' : 'adb', [
           'pull',
           '/data/local/tmp/integration_test_execution.mp4',
           'integration_test_execution.mp4',
         ]);
 
         // Clean up the temporary file from the device
-        await Process.run('adb', [
+        await Process.run(Platform.isWindows ? 'adb.exe' : 'adb', [
           'shell',
           'rm',
           '/data/local/tmp/integration_test_execution.mp4',
