@@ -5,7 +5,7 @@ import 'package:flutter_ci/main.dart' as app;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
-// Run: adb reverse tcp:8080 tcp:8080
+// Run: adb reverse tcp:8085 tcp:8085
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -13,8 +13,8 @@ void main() {
   WebSocket? activeSocket;
 
   setUpAll(() async {
-    // 1. Bind server to any IPv4 interface on port 8080
-    server = await .bind(InternetAddress.anyIPv4, 8080);
+    // 1. Bind server to any IPv4 interface on port 8085
+    server = await .bind(InternetAddress.anyIPv4, 8085);
 
     server!.listen((request) async {
       if (WebSocketTransformer.isUpgradeRequest(request)) {
