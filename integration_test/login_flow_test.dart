@@ -5,7 +5,9 @@ import 'package:flutter_ci/main.dart' as app;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
-// Run: adb reverse tcp:8085 tcp:8085
+// The host connects to the server running on the device
+// Run before starting the test: adb forward tcp:8085 tcp:8085
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
