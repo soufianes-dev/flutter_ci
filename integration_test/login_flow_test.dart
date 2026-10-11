@@ -8,6 +8,39 @@ import 'package:integration_test/integration_test.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
+  HttpServer? hostBridgeServer;
+  setUpAll(() async {
+    // 1. Bind server to any IPv4 interface on port 8080
+    hostBridgeServer = await .bind(InternetAddress.anyIPv4, 8080);
+    hostBridgeServer!.listen((req) async {
+      try {
+        final content = await utf8.decoder.bind(req).join();
+        final data = content.isNotEmpty ? jsonDecode(content) : {};
+
+        if (req.uri.path == '/ping-host') {
+          // Send response back to the host OS
+          req.response.statusCode = HttpStatus.ok;
+          req.response.write(
+            jsonEncode({'status': 'acknowledged', 'received': data}),
+          );
+        } else {
+          req.response.statusCode = HttpStatus.notFound;
+          req.response.write('Endpoint not found');
+        }
+      } catch (e) {
+        req.response.statusCode = HttpStatus.internalServerError;
+        req.response.write(jsonEncode({'error': e.toString()}));
+      } finally {
+        await req.response.close();
+      }
+    });
+  });
+
+  tearDownAll(() async {
+    // Clean up server after test completion
+    await hostBridgeServer?.close(force: true);
+  });
+
   testWidgets('Complete login flow', (tester) async {
     // Start video recording in the background before launching the app
     // NOTE in "macos/Runner/DebugProfile.entitlements" set <key>com.apple.security.app-sandbox</key> to false
