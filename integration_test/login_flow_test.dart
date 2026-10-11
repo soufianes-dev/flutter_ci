@@ -27,17 +27,8 @@ void main() {
           // Listen for incoming messages from the Host OS
           activeSocket!
               .listen((message) {
-                final data = jsonDecode(message);
-                print('Received command from host: $data');
-
-                // Send a response back immediately through the same socket
-                activeSocket!.add(
-                  jsonEncode({
-                    'status': 'acknowledged',
-                    'echo': data,
-                    'timestamp': DateTime.now().toIso8601String(),
-                  }),
-                );
+                // final data = jsonDecode(message);
+                print('Received command from host: $message');
               })
               .onDone(() {
                 activeSocket = null;
@@ -53,11 +44,25 @@ void main() {
   });
 
   tearDownAll(() async {
+    activeSocket?.add(
+      jsonEncode({
+        'status': 'app_closed',
+        'timestamp': DateTime.now().toIso8601String(),
+      }),
+    );
+    Future.delayed(.new(milliseconds: 500));
     await activeSocket?.close();
     await server?.close(force: true);
   });
 
   testWidgets('Complete login flow', (tester) async {
+    // Wait up to 2 min for the host script to connect
+    final deadline = DateTime.now().add(.new(minutes: 1));
+    while (activeSocket == null && DateTime.now().isBefore(deadline)) {
+      await Future.delayed(.new(milliseconds: 200));
+      //
+    }
+
     // Start video recording in the background before launching the app
     // NOTE in "macos/Runner/DebugProfile.entitlements" set <key>com.apple.security.app-sandbox</key> to false
     late final Process process;
@@ -140,6 +145,16 @@ void main() {
       // 1. Launch app
       app.main();
       await tester.pumpAndSettle();
+
+      activeSocket!.add(
+        jsonEncode({
+          'status': 'app_started',
+          // 'echo': data,
+          'timestamp': DateTime.now().toIso8601String(),
+        }),
+      );
+
+      await Future.delayed(.new(seconds: 2));
 
       // 2. Find widgets directly using keys
       final emailField = find.byKey(.new('email'));
