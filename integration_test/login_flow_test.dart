@@ -5,42 +5,54 @@ import 'package:flutter_ci/main.dart' as app;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
-
 // Run: adb reverse tcp:8080 tcp:8080
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  HttpServer? hostBridgeServer;
+  HttpServer? server;
+  WebSocket? activeSocket;
+
   setUpAll(() async {
     // 1. Bind server to any IPv4 interface on port 8080
-    hostBridgeServer = await .bind(InternetAddress.anyIPv4, 8080);
-    hostBridgeServer!.listen((req) async {
-      try {
-        final content = await utf8.decoder.bind(req).join();
-        final data = content.isNotEmpty ? jsonDecode(content) : {};
+    server = await .bind(InternetAddress.anyIPv4, 8080);
 
-        if (req.uri.path == '/ping-host') {
-          // Send response back to the host OS
-          req.response.statusCode = HttpStatus.ok;
-          req.response.write(
-            jsonEncode({'status': 'acknowledged', 'received': data}),
-          );
-        } else {
-          req.response.statusCode = HttpStatus.notFound;
-          req.response.write('Endpoint not found');
+    server!.listen((request) async {
+      if (WebSocketTransformer.isUpgradeRequest(request)) {
+        try {
+          // Upgrade the HTTP request to a persistent WebSocket connection
+          activeSocket = await WebSocketTransformer.upgrade(request);
+
+          // Listen for incoming messages from the Host OS
+          activeSocket!
+              .listen((message) {
+                final data = jsonDecode(message);
+                print('Received command from host: $data');
+
+                // Send a response back immediately through the same socket
+                activeSocket!.add(
+                  jsonEncode({
+                    'status': 'acknowledged',
+                    'echo': data,
+                    'timestamp': DateTime.now().toIso8601String(),
+                  }),
+                );
+              })
+              .onDone(() {
+                activeSocket = null;
+              });
+        } catch (e) {
+          print('WebSocket upgrade failed');
         }
-      } catch (e) {
-        req.response.statusCode = HttpStatus.internalServerError;
-        req.response.write(jsonEncode({'error': e.toString()}));
-      } finally {
-        await req.response.close();
+      } else {
+        request.response.statusCode = HttpStatus.forbidden;
+        await request.response.close();
       }
     });
   });
 
   tearDownAll(() async {
-    // Clean up server after test completion
-    await hostBridgeServer?.close(force: true);
+    await activeSocket?.close();
+    await server?.close(force: true);
   });
 
   testWidgets('Complete login flow', (tester) async {
