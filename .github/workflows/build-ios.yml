@@ -142,9 +142,8 @@ jobs:
       - name: Upload iOS artifact (simulator build)
         uses: actions/upload-artifact@v7
         with:
-          path: |
-            build/ios/iphonesimulator # TODO
-            # coverage/lcov.info
+          path: build/ios/iphonesimulator
+          archive: true
           retention-days: 60
       - name: Install iOS app on simulator
         run: |
