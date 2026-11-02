@@ -923,7 +923,7 @@ platform :ios do
 
   desc "Upload existing Firebase IPA — NEVER builds"
   lane :firebase do
-    check_firebase_artifacts
+    # check_firebase_artifacts # Commented Because publish_firebase already calls it
     publish_firebase
   end
 

@@ -6,7 +6,7 @@ on:
   # Enable manual run through GitHub UI
   workflow_dispatch:
 env:
-  FLUTTER_VERSION: "3.47.6"
+  FLUTTER_VERSION: "3.47.9"
   FLUTTER_CHANNEL: "stable"
 jobs:
   build-wasm:
