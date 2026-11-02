@@ -69,14 +69,6 @@ platform :ios do
     url
   end
 
-  def artifact_flavor
-    flavor = ENV.fetch("ARTIFACT_FLAVOR", "release").downcase.strip
-    unless flavor.match?(/\A[0-9a-z._-]+\z/)
-      UI.user_error!("ARTIFACT_FLAVOR contains invalid characters: '#{flavor}'")
-    end
-    flavor
-  end
-
   PROJECT_ROOT = begin
     dir = __dir__
     while dir != "/" && !File.exist?(File.join(dir, "pubspec.yaml"))
@@ -108,9 +100,9 @@ platform :ios do
 
   FIREBASE_GROUPS      = ENV.fetch("FIREBASE_APP_DISTRIBUTION_GROUPS", "qa-team").freeze
 
-  METADATA_DIRECTORY   = ENV.fetch("FASTLANE_METADATA_PATH", "fastlane/metadata").freeze
-  SCREENSHOTS_DIRECTORY = ENV.fetch("FASTLANE_SCREENSHOTS_PATH", "fastlane/screenshots").freeze
-  RELEASE_NOTES_FILE   = ENV.fetch("RELEASE_NOTES_FILE", "release_notes.txt").freeze
+  # METADATA_DIRECTORY   = ENV.fetch("FASTLANE_METADATA_PATH", "fastlane/metadata").freeze
+  # SCREENSHOTS_DIRECTORY = ENV.fetch("FASTLANE_SCREENSHOTS_PATH", "fastlane/screenshots").freeze
+  RELEASE_NOTES_FILE   = File.join(PROJECT_ROOT, "ios/fastlane/metadata/en-US/release_notes.txt")
 
   # ===========================================================================
   # System & Environment Helpers
@@ -889,6 +881,8 @@ platform :ios do
     build_debug_device_artifact
     build_firebase_ipa_artifact
     build_appstore_ipa_artifact
+
+    # TODO: NOTE that debug symbols will be overridden
 
     UI.success("All iOS build artifacts generated successfully.")
   end

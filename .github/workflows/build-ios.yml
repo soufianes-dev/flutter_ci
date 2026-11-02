@@ -117,7 +117,8 @@ jobs:
           APP_NAME: ${{ env.APP_NAME }}
           BUILD_NAME: ${{ env.BUILD_NAME }}
           BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
-          BUILD_TYPE: "debug"
+          BUILD_FLAVOR: "dev" # or "prod"
+          BUILD_TYPE: "debug" # or "release"
           GITHUB_RUN_ID: ${{ github.run_id }}
           RUNNER_NAME: ${{ runner.name }}
           APP_IDENTIFIER: ${{ env.APP_IDENTIFIER }}
@@ -129,6 +130,8 @@ jobs:
           # APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           # APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
           # FIREBASE_SERVICE_CREDENTIALS_FILE: ${{ secrets.FIREBASE_SERVICE_CREDENTIALS_FILE }}
+          # FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          # FIREBASE_APP_DISTRIBUTION_GROUPS: ${{ secrets.FIREBASE_APP_DISTRIBUTION_GROUPS }}
           # FIREBASE_APP_DISTRIBUTION_TESTERS: ${{ secrets.FIREBASE_APP_DISTRIBUTION_TESTERS }}
         working-directory: ${{ env.WORKING_DIR }}
         run: |
@@ -139,7 +142,9 @@ jobs:
       - name: Upload iOS artifact (simulator build)
         uses: actions/upload-artifact@v7
         with:
-          path: build/ios/iphonesimulator # TODO
+          path: |
+            build/ios/iphonesimulator # TODO
+            # coverage/lcov.info
           retention-days: 60
       - name: Install iOS app on simulator
         run: |
