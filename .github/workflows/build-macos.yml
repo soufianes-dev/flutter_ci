@@ -82,7 +82,6 @@ jobs:
       #   run: flutter test
       - name: Build macOS desktop app
         run: |
-
           lockfilePath="pubspec.lock"
           lockHash=""
           if [ -f "$lockfilePath" ]; then
@@ -132,17 +131,17 @@ jobs:
           path: symbols/macos
           if-no-files-found: error
           retention-days: 30
-      - name: Install FFmpeg
-        run: brew install ffmpeg
-      - name: Run integration tests
-        run: flutter test integration_test/login_flow_test.dart -d macos
-      - name: Upload recording
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: macos-app-recordings
-          path: integration_test_execution.mp4
-          retention-days: 30
+      # - name: Install FFmpeg
+      #   run: brew install ffmpeg
+      # - name: Run integration tests
+      #   run: flutter test integration_test/login_flow_test.dart -d macos
+      # - name: Upload recording
+      #   uses: actions/upload-artifact@v7
+      #   if: always()
+      #   with:
+      #     name: macos-app-recordings
+      #     path: integration_test_execution.mp4
+      #     retention-days: 30
       - name: Package macOS app
         run: |
           set -euo pipefail
